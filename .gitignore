@@ -5,6 +5,7 @@ build/
 .env.local
 .env.*.local
 *.log
+*.tsbuildinfo
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
