@@ -37,6 +37,7 @@ CREATE TABLE "profiles" (
 -- CreateTable
 CREATE TABLE "artists" (
     "id" UUID NOT NULL,
+    "discogs_id" INTEGER NOT NULL,
     "name" TEXT NOT NULL,
     "sort_name" TEXT NOT NULL,
     "article_form" "article_form" NOT NULL,
@@ -125,6 +126,9 @@ CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "profiles_username_key" ON "profiles"("username");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "artists_discogs_id_key" ON "artists"("discogs_id");
 
 -- CreateIndex
 CREATE INDEX "artists_sort_name_idx" ON "artists"("sort_name");

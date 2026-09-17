@@ -82,6 +82,9 @@ model Profile {
 
 model Artist {
   id          String      @id @default(uuid(7)) @db.Uuid
+  /// Id do artista no Discogs. É por onde o import faz upsert em vez de criar
+  /// duplicata a cada busca — ver DiscogsService.importArtist.
+  discogsId   Int         @unique @map("discogs_id")
   name        String
   /// Nome sem artigo inicial, para ordenar "Os Mutantes" em M.
   sortName    String      @map("sort_name")
