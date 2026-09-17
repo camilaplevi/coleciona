@@ -11,53 +11,7 @@ import type {
   CollectionFilters,
   CollectionItem,
 } from '@/types/catalog'
-
-const API_URL = import.meta.env.VITE_API_URL ?? '/api'
-
-export class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message)
-    this.name = 'ApiError'
-  }
-}
-
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
-    ...init,
-    // O token vai em cookie httpOnly, definido pela API no login.
-    // Guardar token em localStorage deixa a sessão exposta a qualquer XSS.
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...init?.headers,
-    },
-  })
-
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}))
-    throw new ApiError(
-      response.status,
-      body.message ?? 'Não foi possível completar a ação. Tente de novo.',
-    )
-  }
-
-  return response.status === 204 ? (undefined as T) : response.json()
-}
-
-function toQueryString(filters: CollectionFilters): string {
-  const params = new URLSearchParams()
-
-  if (filters.search) params.set('busca', filters.search)
-  if (filters.label) params.set('gravadora', filters.label)
-  if (filters.styleSlugs.length) params.set('estilos', filters.styleSlugs.join(','))
-  if (filters.decades.length) params.set('decadas', filters.decades.join(','))
-  params.set('ordenar', filters.sort)
-
-  return params.toString()
-}
+import { request, toQuery } from './http'
 
 /**
  * Coleção de um usuário. A API aplica os filtros em SQL e devolve os itens já
@@ -72,10 +26,17 @@ export function fetchCollection(
   filters: CollectionFilters,
   signal?: AbortSignal,
 ): Promise<CollectionItem[]> {
-  return request<CollectionItem[]>(
-    `/perfis/${encodeURIComponent(username)}/colecao?${toQueryString(filters)}`,
-    { signal },
-  )
+  const path =
+    `/perfis/${encodeURIComponent(username)}/colecao` +
+    toQuery({
+      busca: filters.search,
+      gravadora: filters.label ?? undefined,
+      estilos: filters.styleSlugs,
+      decadas: filters.decades.map(String),
+      ordenar: filters.sort,
+    })
+
+  return request<CollectionItem[]>(path, { signal })
 }
 
 /** Adiciona um disco à coleção de quem está logado. */
