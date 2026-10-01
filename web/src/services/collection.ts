@@ -3,7 +3,7 @@
  *
  * Agora fala com a API própria, que é quem conversa com o Neon. O front não
  * conhece Postgres, não guarda credencial de banco e não sabe o formato das
- * tabelas — só os tipos de domínio.
+ * tabelas, só os tipos de domínio.
  */
 
 import type {
@@ -15,7 +15,7 @@ import { request, toQuery } from './http'
 
 /**
  * Coleção de um usuário. A API aplica os filtros em SQL e devolve os itens já
- * no formato de domínio — a conversão de snake_case para camelCase acontece no
+ * no formato de domínio. A conversão de snake_case para camelCase acontece no
  * backend, perto do banco, e não espalhada pelos componentes.
  *
  * Visibilidade continua sendo decidida no Postgres, pelas políticas de RLS:
@@ -53,7 +53,7 @@ export function removeFromCollection(itemId: string): Promise<void> {
 
 /**
  * Agrupa por artista em ordem alfabética, com os discos de cada um ordenados
- * por ano. Coletâneas sem crédito único ficam de fora dos grupos — elas têm a
+ * por ano. Coletâneas sem crédito único ficam de fora dos grupos, elas têm a
  * faixa própria de séries no topo da tela.
  *
  * Continua no cliente de propósito: são dezenas ou centenas de itens, e trocar

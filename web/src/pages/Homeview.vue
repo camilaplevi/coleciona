@@ -1,25 +1,76 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import AppHeader from '@/components/layout/AppHeader.vue'
+import FeaturedAlbum from '@/components/album/FeaturedAlbum.vue'
 import AlbumGrid from '@/components/Albumgrid.vue'
+import StateMessage from '@/components/feedback/StateMessage.vue'
+import AppToast, { type Toast } from '@/components/feedback/Apptoast.vue'
 import { useAsync } from '@/composables/useAsync'
 import { fetchAlbums, fetchHome } from '@/services/catalog'
 import { addToCollection } from '@/services/collection'
 import { ApiError } from '@/services/http'
+import { describeError } from '@/utils/DescribeError.ts'
+import type { StyleRef } from '@/types/catalog'
 
 const searchTerm = ref('')
-const isSearching = computed(() => searchTerm.value.trim().length > 0)
+const activeStyle = ref<StyleRef | null>(null)
+const query = computed(() => searchTerm.value.trim())
+const isBrowsing = computed(() => query.value.length > 0 || activeStyle.value !== null)
 
 const home = useAsync((signal) => fetchHome(signal))
-const results = useAsync((signal) => fetchAlbums({ search: searchTerm.value.trim() }, signal))
+const results = useAsync((signal) =>
+  fetchAlbums(
+    {
+      search: query.value || undefined,
+      styleSlugs: activeStyle.value ? [activeStyle.value.slug] : undefined,
+    },
+    signal,
+  ),
+)
 
-/** Ids já na coleção. Set porque o AlbumGrid consulta uma vez por card. */
 const featured = computed(() => home.data.value?.featured ?? null)
 const sections = computed(() => home.data.value?.sections ?? [])
+const isHomeEmpty = computed(() => !featured.value && sections.value.length === 0)
+
+const resultsTitle = computed(() => {
+  if (query.value && activeStyle.value) return `“${query.value}” em ${activeStyle.value.name}`
+  if (query.value) return `Resultados para “${query.value}”`
+  return activeStyle.value?.name ?? ''
+})
+
+const resultsCount = computed(() => {
+  const total = results.data.value?.total ?? 0
+  return total === 1 ? '1 disco' : `${total} discos`
+})
+
+let timer: ReturnType<typeof setTimeout> | undefined
+watch(query, () => {
+  clearTimeout(timer)
+  if (!isBrowsing.value) return
+  timer = setTimeout(() => results.run(), 300)
+})
+
+function browseStyle(style: StyleRef) {
+  searchTerm.value = ''
+  activeStyle.value = style
+  results.run()
+  window.scrollTo({ top: 0 })
+}
+
+function backToHome() {
+  searchTerm.value = ''
+  activeStyle.value = null
+}
+
+onMounted(() => home.run())
+
+// ---------------------------------------------------------------------------
+// Coleção
+// ---------------------------------------------------------------------------
 
 const ownedIds = ref(new Set<string>())
 const pendingId = ref<string | null>(null)
-const authPrompt = ref(false)
-const feedback = ref<string | null>(null)
+const toast = ref<Toast | null>(null)
 
 function absorbOwned(ids: string[] | undefined) {
   if (!ids?.length) return
@@ -29,32 +80,33 @@ function absorbOwned(ids: string[] | undefined) {
 watch(() => home.data.value, (payload) => absorbOwned(payload?.ownedAlbumIds))
 watch(() => results.data.value, (payload) => absorbOwned(payload?.ownedAlbumIds))
 
-// Sem debounce, cada tecla vira uma requisição. 300ms é o intervalo em que
-// uma pausa na digitação já parece intencional.
-let timer: ReturnType<typeof setTimeout> | undefined
-watch(searchTerm, () => {
-  clearTimeout(timer)
-  if (!isSearching.value) return
-  timer = setTimeout(() => results.run(), 300)
-})
-
-onMounted(() => home.run())
+function promptSignup(message = 'Crie sua conta para começar a montar sua coleção.') {
+  toast.value = {
+    message,
+    tone: 'info',
+    actionLabel: 'Criar conta',
+    action: () => {},
+  }
+}
 
 async function handleAdd(albumId: string) {
   pendingId.value = albumId
-  feedback.value = null
 
   try {
     await addToCollection(albumId)
-    // Atribuir um Set novo em vez de mutar: shallow refs não reagem a .add().
     ownedIds.value = new Set([...ownedIds.value, albumId])
+    toast.value = { message: 'Disco adicionado à sua coleção.', tone: 'info' }
   } catch (cause) {
-    // O servidor é quem decide se há sessão. O front só reage ao 401 — assim
-    // não existe estado em que o botão pareça habilitado e não funcione.
     if (cause instanceof ApiError && cause.needsAuth) {
-      authPrompt.value = true
-    } else {
-      feedback.value = cause instanceof Error ? cause.message : 'Não foi possível adicionar.'
+      promptSignup()
+      return
+    }
+    toast.value = {
+      message:
+        cause instanceof ApiError && cause.kind !== 'server'
+          ? cause.message
+          : 'Não foi possível adicionar agora. Tente de novo em instantes.',
+      tone: 'error',
     }
   } finally {
     pendingId.value = null
@@ -72,72 +124,49 @@ function openArtist(id: string) {
 
 <template>
   <div class="min-h-screen bg-page">
-    <header class="border-b border-hairline bg-card">
-      <div class="mx-auto flex max-w-[1200px] items-center gap-6 px-6 py-4">
-        <span class="font-display text-xl">Coleciona</span>
+    <AppHeader
+      v-model:search="searchTerm"
+      @auth="promptSignup()"
+      @open-collection="promptSignup('Entre na sua conta para ver a sua coleção.')"
+    />
 
-        <div class="flex-1">
-          <label for="busca" class="sr-only">Buscar por artista, álbum, gravadora ou ano</label>
-          <input
-            id="busca"
-            v-model="searchTerm"
-            type="search"
-            placeholder="Artista, álbum, gravadora ou ano"
-            class="h-10 w-full rounded-full border border-hairline bg-page px-4 text-[15px]
-                   text-ink placeholder:text-ink-muted"
-          />
+    <main class="mx-auto max-w-[1200px] px-6 pb-28 pt-10 md:pt-14">
+      <!-- ============================================================== -->
+      <!-- Resultados: busca ou "ver todos" de um estilo                    -->
+      <!-- ============================================================== -->
+      <section v-if="isBrowsing" aria-labelledby="titulo-resultados">
+        <div class="mb-10 flex flex-wrap items-end justify-between gap-4 border-b border-hairline pb-6">
+          <div>
+            <button
+              type="button"
+              class="mb-4 inline-flex items-center gap-1.5 text-sm text-ink-soft transition-colors
+                     hover:text-accent"
+              @click="backToHome"
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75"
+                   stroke-linecap="round" stroke-linejoin="round" class="size-4" aria-hidden="true">
+                <path d="M10 3.5L5.5 8l4.5 4.5" />
+              </svg>
+              Voltar ao início
+            </button>
+            <h1 id="titulo-resultados" class="font-display text-3xl text-ink md:text-4xl">
+              {{ resultsTitle }}
+            </h1>
+          </div>
+          <p
+            v-if="results.data.value && !results.loading.value && !results.error.value"
+            class="text-sm text-ink-muted"
+          >
+            {{ resultsCount }}
+          </p>
         </div>
 
-        <button
-          type="button"
-          class="h-10 shrink-0 rounded-control bg-accent px-4 text-sm font-medium text-white
-                 hover:bg-accent-hover"
-          @click="authPrompt = true"
-        >
-          Criar conta
-        </button>
-      </div>
-    </header>
-
-    <!-- O convite ao cadastro só aparece depois de uma tentativa real de
-         interagir. Banner de entrada antes de a pessoa ver o acervo é o que
-         faz visitante fechar a aba. -->
-    <div
-      v-if="authPrompt"
-      class="border-b border-accent bg-accent-wash"
-      role="status"
-    >
-      <div class="mx-auto flex max-w-[1200px] items-center gap-4 px-6 py-3">
-        <p class="flex-1 text-sm text-accent">
-          Crie sua conta para montar sua coleção. Leva menos de um minuto.
-        </p>
-        <button type="button" class="text-sm underline" @click="authPrompt = false">
-          Agora não
-        </button>
-      </div>
-    </div>
-
-    <main class="mx-auto max-w-[1200px] px-6 py-10">
-      <p
-        v-if="feedback"
-        class="mb-6 rounded-card border border-hairline bg-card px-4 py-3 text-sm text-ink-soft"
-        role="status"
-      >
-        {{ feedback }}
-      </p>
-
-      <!-- Resultados de busca -->
-      <section v-if="isSearching">
-        <h1 class="mb-6 font-display text-2xl">
-          Resultados para “{{ searchTerm.trim() }}”
-        </h1>
-
-        <p v-if="results.error.value" class="text-[15px] text-ink-soft">
-          {{ results.error.value }}
-          <button type="button" class="ml-2 text-accent underline" @click="results.run()">
-            Tentar de novo
-          </button>
-        </p>
+        <StateMessage
+          v-if="results.error.value"
+          v-bind="describeError(results.error.value, 'os resultados')"
+          action-label="Tentar de novo"
+          @action="results.run()"
+        />
 
         <AlbumGrid
           v-else
@@ -146,76 +175,100 @@ function openArtist(id: string) {
           :pending-id="pendingId"
           :loading="results.loading.value"
           :skeleton-count="10"
-          empty-message="Nenhum disco encontrado. Tente outro termo."
+          empty-title="Nenhum disco encontrado"
+          empty-description="Confira a grafia, ou tente pelo nome do artista ou da gravadora."
           @add="handleAdd"
           @open-album="openAlbum"
           @open-artist="openArtist"
-        ></AlbumGrid>
+        />
       </section>
 
-      <!-- Página inicial -->
+      <!-- ============================================================== -->
+      <!-- Página inicial                                                   -->
+      <!-- ============================================================== -->
       <template v-else>
-        <p v-if="home.error.value" class="text-[15px] text-ink-soft">
-          {{ home.error.value }}
-          <button type="button" class="ml-2 text-accent underline" @click="home.run()">
-            Tentar de novo
-          </button>
-        </p>
+        <h1 class="sr-only">Explorar o catálogo</h1>
+
+        <StateMessage
+          v-if="home.error.value"
+          v-bind="describeError(home.error.value, 'o catálogo')"
+          action-label="Tentar de novo"
+          @action="home.run()"
+        />
+
+        <!-- Esqueleto só na primeira carga. Numa nova tentativa, o conteúdo
+             anterior continua na tela em vez de piscar. -->
+        <div v-else-if="home.loading.value && !home.data.value" aria-busy="true">
+          <div class="mb-20 grid items-center gap-8 md:grid-cols-[minmax(0,360px)_1fr] md:gap-14">
+            <div class="aspect-square w-full max-w-[360px] animate-pulse rounded-cover bg-inset" />
+            <div class="space-y-4">
+              <div class="h-4 w-32 animate-pulse rounded bg-inset" />
+              <div class="h-12 w-3/4 animate-pulse rounded bg-inset" />
+              <div class="h-5 w-1/3 animate-pulse rounded bg-inset" />
+            </div>
+          </div>
+          <AlbumGrid :albums="[]" loading :skeleton-count="5" />
+        </div>
+
+        <StateMessage
+          v-else-if="isHomeEmpty"
+          tone="empty"
+          title="O catálogo ainda está vazio"
+          description="Assim que os primeiros discos forem cadastrados, eles aparecem aqui."
+        />
 
         <template v-else>
-          <section v-if="featured" class="mb-12 flex flex-wrap gap-10">
-            <div class="h-[280px] w-[280px] shrink-0 rounded-cover bg-inset"></div>
-            <div class="min-w-[280px] flex-1">
-              <p class="mb-2 text-xs text-ink-muted">Destaque</p>
-              <h1 class="mb-2 font-display text-4xl leading-tight">
-                {{ featured.title }}
-              </h1>
-              <p class="mb-6 text-[15px] text-ink-soft">
-                {{ featured.primaryArtist?.name ?? 'Vários artistas' }}
-                <template v-if="featured.label">
-                  — {{ featured.label }}, {{ featured.releaseYear }}
-                </template>
-              </p>
-              <button
-                type="button"
-                class="h-11 rounded-control bg-accent px-5 text-sm font-medium text-white
-                       hover:bg-accent-hover"
-                @click="handleAdd(featured.id)"
-              >
-                Adicionar à coleção
-              </button>
-            </div>
-          </section>
-
-          <div v-if="home.loading.value" class="space-y-12">
-            <AlbumGrid :albums="[]" loading :skeleton-count="5"></AlbumGrid>
-          </div>
+          <FeaturedAlbum
+            v-if="featured"
+            class="mb-16 md:mb-24"
+            :album="featured"
+            :owned="ownedIds.has(featured.id)"
+            :pending="pendingId === featured.id"
+            @add="handleAdd"
+            @open-album="openAlbum"
+            @open-artist="openArtist"
+          />
 
           <section
-            v-for="section in sections"
+            v-for="(section, index) in sections"
             :key="section.style.id"
-            class="mb-12"
+            :aria-labelledby="`secao-${section.style.slug}`"
+            class="mb-16 border-t border-hairline pt-8 md:mb-20"
           >
-            <h2 class="mb-6 font-display text-2xl">{{ section.style.name }}</h2>
+            <div class="mb-8 flex items-baseline justify-between gap-4">
+              <h2
+                :id="`secao-${section.style.slug}`"
+                class="font-display text-2xl text-ink md:text-3xl"
+              >
+                {{ section.style.name }}
+              </h2>
+              <button
+                type="button"
+                class="shrink-0 text-sm text-accent transition-colors hover:text-accent-hover
+                       hover:underline"
+                @click="browseStyle(section.style)"
+              >
+                Ver todos
+                <!-- Sem isto, o leitor de tela anuncia quatro "Ver todos"
+                     idênticos e a pessoa não sabe qual é qual. -->
+                <span class="sr-only">os discos de {{ section.style.name }}</span>
+              </button>
+            </div>
+
             <AlbumGrid
+              :variant="index === 0 ? 'editorial' : 'grid'"
               :albums="section.albums"
               :owned-ids="ownedIds"
               :pending-id="pendingId"
               @add="handleAdd"
               @open-album="openAlbum"
               @open-artist="openArtist"
-            ></AlbumGrid>
+            />
           </section>
-
-          <p
-            v-if="!home.loading.value && !sections.length"
-            class="py-12 text-center text-[15px] text-ink-muted"
-          >
-            O catálogo ainda está vazio. Rode <code>npx tsx prisma/seed.ts</code> na pasta
-            <code>api</code> para popular.
-          </p>
         </template>
       </template>
     </main>
+
+    <AppToast :toast="toast" @close="toast = null" />
   </div>
 </template>

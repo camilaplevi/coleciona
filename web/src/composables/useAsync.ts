@@ -2,17 +2,9 @@
 
 import { ref, shallowRef } from 'vue'
 
-/**
- * Estado de uma chamada assíncrona: dados, carregando e erro, com
- * cancelamento da requisição anterior.
- *
- * O cancelamento importa mais do que parece na busca: digitar "coltrane"
- * dispara oito requisições, e sem AbortController a resposta de "colt" pode
- * chegar depois da de "coltrane" e sobrescrever o resultado certo.
- */
 export function useAsync<T>(fn: (signal: AbortSignal) => Promise<T>) {
   const data = shallowRef<T | null>(null)
-  const error = ref<string | null>(null)
+  const error = shallowRef<unknown>(null)
   const loading = ref(false)
 
   let controller: AbortController | null = null
@@ -31,7 +23,7 @@ export function useAsync<T>(fn: (signal: AbortSignal) => Promise<T>) {
       data.value = result
     } catch (cause) {
       if (signal.aborted) return
-      error.value = cause instanceof Error ? cause.message : 'Algo deu errado.'
+      error.value = cause 
     } finally {
       if (!signal.aborted) loading.value = false
     }

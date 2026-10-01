@@ -1,5 +1,6 @@
     <script setup lang="ts">
 import type { AlbumSummary } from '@/types/catalog'
+import StateMessage from '@/components/feedback/StateMessage.vue'
 import AlbumCard from '@/components/Albumcard.vue'
 
 withDefaults(
@@ -13,8 +14,11 @@ withDefaults(
     readonly?: boolean
     loading?: boolean
     /** Quantos esqueletos mostrar enquanto carrega. */
-    skeletonCount?: number
-    emptyMessage?: string
+     skeletonCount?: number
+    emptyTitle?: string
+    emptyDescription?: string
+    /** 'editorial': o primeiro disco ocupa 2×2 e os outros quatro fecham o bloco. */
+    variant?: 'grid' | 'editorial'
   }>(),
   {
     ownedIds: () => new Set<string>(),
@@ -22,7 +26,9 @@ withDefaults(
     readonly: false,
     loading: false,
     skeletonCount: 5,
-    emptyMessage: 'Nenhum disco por aqui ainda.',
+    emptyTitle: 'Nenhum disco por aqui ainda',
+    emptyDescription: undefined,
+    variant: 'grid',
   },
 )
 
@@ -49,9 +55,32 @@ defineEmits<{
     </div>
   </div>
 
-  <p v-else-if="albums.length === 0" class="py-8 text-center text-[15px] text-ink-muted">
-    {{ emptyMessage }}
-  </p>
+  <StateMessage
+    v-else-if="albums.length === 0"
+    tone="not-found"
+    compact
+    :title="emptyTitle"
+    :description="emptyDescription"
+  />
+
+  <div
+    v-else-if="variant === 'editorial'"
+    class="grid grid-cols-2 items-start gap-6 md:grid-cols-4"
+  >
+    <AlbumCard
+      v-for="(album, index) in albums"
+      :key="album.id"
+      :album="album"
+      :size="index === 0 ? 'lg' : 'md'"
+      :class="index === 0 ? 'col-span-2 md:row-span-2' : ''"
+      :owned="ownedIds.has(album.id)"
+      :pending="pendingId === album.id"
+      :readonly="readonly"
+      @add="$emit('add', $event)"
+      @open-album="$emit('openAlbum', $event)"
+      @open-artist="$emit('openArtist', $event)"
+    />
+  </div>
 
   <div
     v-else
