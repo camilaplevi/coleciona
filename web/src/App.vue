@@ -1,8 +1,8 @@
-<!-- depois -->
 <script setup lang="ts">
-import HomeView from '@/pages/Homeview.vue'
+// Casca da aplicação: cada tela entra pelo router, então o App só precisa
+// de um ponto de saída para elas.
 </script>
 
 <template>
-  <HomeView />
+  <RouterView />
 </template>
