@@ -18,6 +18,8 @@ export interface AlbumQuery {
 /** Quantos discos cada seção da home mostra. */
 const SECTION_SIZE = 5
 
+const FOR_YOU_SIZE = 10
+
 @Injectable()
 export class CatalogService {
   constructor(private readonly prisma: PrismaService) {}
@@ -32,7 +34,18 @@ export class CatalogService {
   async home(viewerId: string | null) {
     const db = this.prisma.forUser(viewerId)
 
+    const preferences = await this.preferencesOf(viewerId)
+
     const styles = await db.style.findMany({ orderBy: { name: 'asc' } })
+
+    // Estilos escolhidos no onboarding sobem para o topo; os demais seguem
+    // em ordem alfabética. Ninguém some da home — personalizar é reordenar,
+    // não esconder, senão a pessoa nunca descobre nada fora da própria bolha.
+    styles.sort((a, b) => {
+      const preferredA = preferences.styleIds.has(a.id) ? 0 : 1
+      const preferredB = preferences.styleIds.has(b.id) ? 0 : 1
+      return preferredA - preferredB || a.name.localeCompare(b.name, 'pt-BR')
+    })
 
     const sections = await Promise.all(
       styles.map(async (style) => ({
@@ -57,18 +70,47 @@ export class CatalogService {
       take: 1,
     })
 
+    const forYou = preferences.artistIds.size
+      ? (
+          await db.album.findMany({
+            where: { artists: { some: { artistId: { in: [...preferences.artistIds] } } } },
+            include: albumInclude,
+            orderBy: { releaseYear: 'desc' },
+            take: FOR_YOU_SIZE,
+          })
+        ).map(toAlbumSummary)
+      : []
+
     const populated = sections.filter((section) => section.albums.length > 0)
     const albumIds = [
       ...new Set([
         ...populated.flatMap((s) => s.albums.map((a) => a.id)),
+        ...forYou.map((a) => a.id),
         ...(featuredRow ? [featuredRow.id] : []),
       ]),
     ]
 
     return {
       featured: featuredRow ? toAlbumSummary(featuredRow) : null,
+      forYou,
       sections: populated,
       ownedAlbumIds: await this.ownedAmong(viewerId, albumIds),
+    }
+  }
+
+  /** Preferências do onboarding. Vazias para visitante e para quem pulou. */
+  private async preferencesOf(viewerId: string | null) {
+    if (!viewerId) return { styleIds: new Set<string>(), artistIds: new Set<string>() }
+
+    const db = this.prisma.forUser(viewerId)
+    const [styles, artists] = await Promise.all([
+      db.profileStyle.findMany({ where: { profileId: viewerId }, select: { styleId: true } }),
+      db.profileArtist.findMany({ where: { profileId: viewerId }, select: { artistId: true } }),
+    ])
+
+    return {
+      styleIds: new Set(styles.map((row) => row.styleId)),
+      artistIds: new Set(artists.map((row) => row.artistId)),
     }
   }
 
