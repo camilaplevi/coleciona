@@ -81,6 +81,7 @@ export interface Profile {
   avatarUrl: string | null
   isPublic: boolean
   favoriteItemId: string | null
+  hasOnboarded: boolean
 }
 
 /** Estado dos filtros da tela de coleção. Vira query string na URL. */
