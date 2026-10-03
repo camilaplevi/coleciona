@@ -124,11 +124,7 @@ function openArtist(id: string) {
 
 <template>
   <div class="min-h-screen bg-page">
-    <AppHeader
-      v-model:search="searchTerm"
-      @auth="promptSignup()"
-      @open-collection="promptSignup('Entre na sua conta para ver a sua coleção.')"
-    />
+    <AppHeader v-model:search="searchTerm" />
 
     <main class="mx-auto max-w-[1200px] px-6 pb-28 pt-10 md:pt-14">
       <!-- ============================================================== -->
