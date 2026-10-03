@@ -60,20 +60,51 @@ model User {
 /// A parte pública da conta. Compartilha o id com User para que as políticas
 /// possam comparar `id = current_user_id()` sem um join.
 model Profile {
-  id             String   @id @db.Uuid
-  username       String   @unique
-  displayName    String   @map("display_name")
+  id             String    @id @db.Uuid
+  username       String    @unique
+  displayName    String    @map("display_name")
   bio            String?
-  avatarUrl      String?  @map("avatar_url")
-  isPublic       Boolean  @default(true) @map("is_public")
-  favoriteItemId String?  @map("favorite_item_id") @db.Uuid
-  createdAt      DateTime @default(now()) @map("created_at")
+  avatarUrl      String?   @map("avatar_url")
+  isPublic       Boolean   @default(true) @map("is_public")
+  favoriteItemId String?   @map("favorite_item_id") @db.Uuid
+  /// Null enquanto a pessoa não concluiu o onboarding. É este campo que o
+  /// front consulta para saber se manda para as perguntas ou para a home.
+  onboardedAt    DateTime? @map("onboarded_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
 
   user         User             @relation(fields: [id], references: [id], onDelete: Cascade)
   items        CollectionItem[]
   favoriteItem CollectionItem?  @relation("FavoriteItem", fields: [favoriteItemId], references: [id], onDelete: SetNull)
+  styles       ProfileStyle[]
+  artists      ProfileArtist[]
 
   @@map("profiles")
+}
+
+/// Estilos escolhidos no onboarding. Alimentam a ordem das seções da home.
+model ProfileStyle {
+  profileId String @map("profile_id") @db.Uuid
+  styleId   String @map("style_id") @db.Uuid
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  style   Style   @relation(fields: [styleId], references: [id], onDelete: Cascade)
+
+  @@id([profileId, styleId])
+  @@index([styleId])
+  @@map("profile_styles")
+}
+
+/// Artistas escolhidos no onboarding. Alimentam a seção "Para você".
+model ProfileArtist {
+  profileId String @map("profile_id") @db.Uuid
+  artistId  String @map("artist_id") @db.Uuid
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  artist  Artist  @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  @@id([profileId, artistId])
+  @@index([artistId])
+  @@map("profile_artists")
 }
 
 // ---------------------------------------------------------------------------
@@ -93,7 +124,8 @@ model Artist {
   activeTo    Int?        @map("active_to")
   imageUrl    String?     @map("image_url")
 
-  albums AlbumArtist[]
+  albums   AlbumArtist[]
+  profiles ProfileArtist[]
 
   @@index([sortName])
   @@map("artists")
@@ -144,7 +176,8 @@ model Style {
   slug String @unique
   name String
 
-  albums AlbumStyle[]
+  albums   AlbumStyle[]
+  profiles ProfileStyle[]
 
   @@map("styles")
 }
