@@ -9,7 +9,7 @@ export class ApiError extends Error {
     this.name = 'ApiError'
   }
 
- get needsAuth(): boolean {
+  get needsAuth(): boolean {
     return this.status === 401
   }
 
@@ -41,16 +41,16 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(0, 'Não foi possível falar com o servidor. Verifique sua conexão.')
   }
 
-  // depois
   if (!response.ok) {
     const body = await response.json().catch(() => ({}) as { message?: unknown })
 
     // Só 4xx traz mensagem nossa, escrita em português para quem usa.
     // 5xx traz texto técnico ("Internal server error") que não ajuda ninguém.
     // O typeof cobre o ValidationPipe do Nest, que manda message como array.
+    const raw = Array.isArray(body.message) ? body.message[0] : body.message
     const message =
-      response.status < 500 && typeof body.message === 'string'
-        ? body.message
+      response.status < 500 && typeof raw === 'string'
+        ? raw
         : 'Não foi possível completar a ação. Tente de novo.'
 
     throw new ApiError(response.status, message)
