@@ -6,11 +6,13 @@ import { CollectionModule } from './collection/collection.module.js';
 import { DiscogsModule } from './discogs/discogs.module.js';
 import { CatalogModule } from './catalog/catalog.module.js';
 import { OnboardingModule } from './onboarding/onboarding.module.js';
+import { MailModule } from './mail/mail.module.js';
 import { AuthModule } from './auth/auth.module.js';
 
 @Module({
   imports: [
     PrismaModule,
+    MailModule,
     AuthModule,
     CollectionModule,
     CatalogModule,

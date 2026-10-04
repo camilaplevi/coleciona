@@ -1,31 +1,53 @@
 import {
+  BadRequestException,
   ConflictException,
+  HttpException,
+  HttpStatus,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import bcrypt from 'bcrypt'
-import { Prisma } from '../generated/prisma/client.js'
+import { createHash, randomBytes } from 'node:crypto'
+import { uniqueConflictField } from '../common/prisma-errors.js'
+import { MailService } from '../mail/mail.service.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 
 const SALT_ROUNDS = 12
 const MAX_USERNAME_ATTEMPTS = 100
+const VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000
+const RESEND_COOLDOWN_MS = 60 * 1000
+
+// Só o hash vai para o banco: o token em claro existe apenas no link do e-mail.
+function newVerificationToken() {
+  const token = randomBytes(32).toString('base64url')
+  return {
+    token,
+    hash: hashToken(token),
+    expiresAt: new Date(Date.now() + VERIFICATION_TTL_MS),
+  }
+}
+
+function hashToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex')
+}
+
+function confirmationUrl(token: string): string {
+  const base = process.env.APP_URL ?? 'http://localhost:5173'
+  return `${base}/confirmar-email?token=${encodeURIComponent(token)}`
+}
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
+    private readonly mail: MailService,
   ) {}
 
-  /**
-   * Cria conta e perfil na mesma transação.
-   *
-   * A ordem importa: `users` fica fora do RLS, então o primeiro insert passa
-   * sem sessão. Já `profiles` exige `id = current_user_id()`, por isso o
-   * set_config acontece entre os dois — ainda dentro da mesma transação, na
-   * mesma conexão.
-   */
+  private readonly logger = new Logger(AuthService.name)
+
   async register(email: string, password: string, displayName: string) {
     const normalizedEmail = email.trim().toLowerCase()
 
@@ -34,9 +56,7 @@ export class AuthService {
       select: { id: true },
     })
 
-    // Aqui a enumeração de contas é aceitável e inevitável: o cadastro
-    // precisa dizer que o e-mail já existe, senão a pessoa não entende por
-    // que não entrou. O login é que não revela nada (ver abaixo).
+    // Revelar que o e-mail já existe é aceitável aqui. No login, não revelamos nada.
     if (existing) {
       throw new ConflictException('Já existe uma conta com este e-mail.')
     }
@@ -44,12 +64,9 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS)
     const base = usernameBase(displayName)
 
-    // A checagem de unicidade não pode ser feita antes do insert: o RLS
-    // esconde de quem está cadastrando os perfis privados alheios, então um
-    // username ocupado por um perfil privado não aparece em nenhuma consulta
-    // prévia. Quem decide é o próprio insert — em caso de colisão, tenta o
-    // próximo sufixo. Cada tentativa é uma transação nova, então o usuário
-    // da tentativa que falhou também é desfeito.
+    // Colisão de username só aparece no insert, então é ele quem decide. Cada tentativa é uma transação nova.
+    const verification = newVerificationToken()
+
     for (let suffix = 0; suffix < MAX_USERNAME_ATTEMPTS; suffix += 1) {
       const username = suffix === 0 ? base : `${base}-${suffix}`
 
@@ -59,8 +76,16 @@ export class AuthService {
           passwordHash,
           username,
           displayName.trim(),
+          verification,
         )
-        return { token: this.signToken(profile.id), profile: toProfilePayload(profile) }
+
+        // Falha de envio não desfaz o cadastro: a pessoa pode pedir outro link.
+        await this.sendConfirmation(normalizedEmail, profile.displayName, verification.token)
+
+        return {
+          token: this.signToken(profile.id),
+          profile: toProfilePayload(profile, false),
+        }
       } catch (error) {
         const field = uniqueConflictField(error)
 
@@ -68,22 +93,29 @@ export class AuthService {
           throw new ConflictException('Já existe uma conta com este e-mail.')
         }
         if (field !== 'username') throw error
-        // username em conflito: segue para o próximo sufixo.
       }
     }
 
     throw new ConflictException('Não foi possível gerar um endereço para o seu perfil. Tente outro nome.')
   }
 
+  // users fica fora do RLS, então o insert passa sem sessão. profiles exige
+  // app.current_user_id: o set_config vem entre os dois, na mesma transação.
   private createAccount(
     email: string,
     passwordHash: string,
     username: string,
     displayName: string,
+    verification: { hash: string; expiresAt: Date },
   ) {
     return this.prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
-        data: { email, passwordHash },
+        data: {
+          email,
+          passwordHash,
+          emailVerificationTokenHash: verification.hash,
+          emailVerificationExpiresAt: verification.expiresAt,
+        },
         select: { id: true },
       })
 
@@ -98,16 +130,13 @@ export class AuthService {
   async login(email: string, password: string) {
     const user = await this.prisma.user.findUnique({
       where: { email: email.trim().toLowerCase() },
-      select: { id: true, passwordHash: true },
+      select: { id: true, passwordHash: true, emailVerifiedAt: true },
     })
 
-    // Mesma mensagem para e-mail inexistente e senha errada: diferenciar as
-    // duas transforma o login num verificador de quem tem conta no site.
+    // Mesma mensagem para e-mail inexistente e senha errada: não enumera contas.
     const invalid = new UnauthorizedException('E-mail ou senha incorretos.')
     if (!user) {
-      // Hash descartado de propósito, para que a resposta demore o mesmo
-      // tanto com e sem conta. Sem isto, o tempo de resposta denuncia quais
-      // e-mails existem.
+      // Compara com um hash descartável: o tempo de resposta não revela contas existentes.
       await bcrypt.compare(password, '$2b$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidin')
       throw invalid
     }
@@ -122,10 +151,12 @@ export class AuthService {
 
     if (!profile) throw invalid
 
-    return { token: this.signToken(profile.id), profile: toProfilePayload(profile) }
+    return {
+      token: this.signToken(profile.id),
+      profile: toProfilePayload(profile, user.emailVerifiedAt !== null),
+    }
   }
 
-  /** Dados da sessão atual. Alimenta o estado de autenticação do front. */
   async me(userId: string) {
     const profile = await this.prisma.forUser(userId).profile.findUnique({
       where: { id: userId },
@@ -135,7 +166,97 @@ export class AuthService {
       throw new UnauthorizedException('Sessão inválida.')
     }
 
-    return toProfilePayload(profile)
+    return toProfilePayload(profile, await this.isEmailVerified(userId))
+  }
+
+  // UPDATE condicionado ao hash e à validade: cliques repetidos no mesmo link não competem.
+  async confirmEmail(token: string): Promise<void> {
+    const result = await this.prisma.user.updateMany({
+      where: {
+        emailVerificationTokenHash: hashToken(token),
+        emailVerificationExpiresAt: { gt: new Date() },
+      },
+      data: {
+        emailVerifiedAt: new Date(),
+        emailVerificationTokenHash: null,
+        emailVerificationExpiresAt: null,
+      },
+    })
+
+    if (result.count === 0) {
+      throw new BadRequestException('Este link é inválido ou já expirou. Peça um novo na sua conta.')
+    }
+  }
+
+  // Trocar o hash invalida o link anterior.
+  async resendConfirmation(userId: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, emailVerifiedAt: true, emailVerificationExpiresAt: true },
+    })
+
+    if (!user) throw new UnauthorizedException('Sessão inválida.')
+    if (user.emailVerifiedAt) {
+      throw new BadRequestException('Seu e-mail já está confirmado.')
+    }
+
+    // O prazo é de 24h desde a criação do token; menos de um minuto de vida = envio recente.
+    const createdAt = user.emailVerificationExpiresAt
+      ? user.emailVerificationExpiresAt.getTime() - VERIFICATION_TTL_MS
+      : 0
+    if (Date.now() - createdAt < RESEND_COOLDOWN_MS) {
+      throw new HttpException(
+        'Acabamos de enviar um e-mail. Aguarde um minuto antes de pedir outro.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      )
+    }
+
+    const profile = await this.prisma.forUser(userId).profile.findUnique({
+      where: { id: userId },
+      select: { displayName: true },
+    })
+
+    const verification = newVerificationToken()
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        emailVerificationTokenHash: verification.hash,
+        emailVerificationExpiresAt: verification.expiresAt,
+      },
+    })
+
+    await this.sendConfirmation(user.email, profile?.displayName ?? 'Colecionador', verification.token)
+  }
+
+  // Lido do banco a cada escrita: o JWT não sabe se o e-mail foi confirmado depois do login.
+  async ensureVerified(userId: string): Promise<void> {
+    if (!(await this.isEmailVerified(userId))) {
+      throw new HttpException(
+        'Confirme seu e-mail para salvar isto. Enviamos um link quando você criou a conta.',
+        HttpStatus.FORBIDDEN,
+      )
+    }
+  }
+
+  private async isEmailVerified(userId: string): Promise<boolean> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { emailVerifiedAt: true },
+    })
+    return user?.emailVerifiedAt != null
+  }
+
+  // Falha de envio vira log: quem precisa do link pede outro.
+  private async sendConfirmation(to: string, displayName: string, token: string): Promise<void> {
+    try {
+      await this.mail.sendConfirmation({
+        to,
+        displayName,
+        confirmationUrl: confirmationUrl(token),
+      })
+    } catch (error) {
+      this.logger.error(`Falha ao enviar confirmação para ${to}`, error as Error)
+    }
   }
 
   async updateUsername(userId: string, username: string) {
@@ -150,7 +271,8 @@ export class AuthService {
       throw new ConflictException('Este endereço de perfil já está em uso.')
     }
 
-    return toProfilePayload(await db.profile.update({ where: { id: userId }, data: { username } }))
+    const updated = await db.profile.update({ where: { id: userId }, data: { username } })
+    return toProfilePayload(updated, await this.isEmailVerified(userId))
   }
 
   private signToken(userId: string): string {
@@ -159,11 +281,7 @@ export class AuthService {
 
 }
 
-/**
- * Deriva um endereço de perfil legível do nome ("Camila Pleví" → "camila-plevi").
- * Colisões são resolvidas por quem chama, acrescentando um número — melhor que
- * um sufixo aleatório, porque a pessoa ainda reconhece o próprio endereço.
- */
+/** "Camila Pleví" → "camila-plevi". Colisões são resolvidas por quem chama. */
 function usernameBase(displayName: string): string {
   return (
     displayName
@@ -176,30 +294,6 @@ function usernameBase(displayName: string): string {
   )
 }
 
-/**
- * Qual campo único estourou, quando o erro é de unicidade (P2002). Devolve
- * null para qualquer outro erro, que deve seguir sem ser tratado aqui.
- */
-function uniqueConflictField(error: unknown): 'username' | 'email' | null {
-  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
-    return null
-  }
-
-  // Com o driver adapter, o nome da constraint vem dentro de driverAdapterError
-  // e não em meta.target. Lemos os dois, senão a colisão vira 500.
-  const meta = error.meta as
-    | { target?: unknown; driverAdapterError?: { cause?: { constraint?: { index?: string }; originalMessage?: string } } }
-    | undefined
-  const cause = meta?.driverAdapterError?.cause
-  const text = [meta?.target, cause?.constraint?.index, cause?.originalMessage]
-    .flat()
-    .filter(Boolean)
-    .join(' ')
-
-  if (text.includes('username')) return 'username'
-  if (text.includes('email')) return 'email'
-  return null
-}
 
 interface ProfileRow {
   id: string
@@ -212,7 +306,7 @@ interface ProfileRow {
 }
 
 /** Nunca inclui e-mail nem hash: este objeto vai inteiro para o navegador. */
-function toProfilePayload(profile: ProfileRow) {
+function toProfilePayload(profile: ProfileRow, emailVerified: boolean) {
   return {
     id: profile.id,
     username: profile.username,
@@ -220,8 +314,8 @@ function toProfilePayload(profile: ProfileRow) {
     bio: profile.bio,
     avatarUrl: profile.avatarUrl,
     isPublic: profile.isPublic,
-    // Booleano em vez da data: o front só precisa saber se manda para o
-    // onboarding ou para a home.
+    // Booleano em vez da data: o front só decide entre onboarding e home.
     hasOnboarded: profile.onboardedAt !== null,
+    emailVerified,
   }
 }

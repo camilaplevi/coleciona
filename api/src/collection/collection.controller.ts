@@ -1,5 +1,3 @@
-// api/src/collection/collection.controller.ts
-
 import {
   Body,
   Controller,
@@ -12,11 +10,12 @@ import {
   Query,
   Req,
   UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common'
 import type { Request } from 'express'
+import { EmailVerifiedGuard } from '../auth/email-verified.guard.js'
 import { CollectionFilters, CollectionService } from './collection.service.js'
 
-/** Formato que o guard de autenticação vai anexar à requisição. */
 interface RequestWithUser extends Request {
   user?: { id: string }
 }
@@ -25,15 +24,13 @@ interface RequestWithUser extends Request {
 export class CollectionController {
   constructor(private readonly collection: CollectionService) {}
 
-  /** GET /api/perfis/:username/colecao */
   @Get('perfis/:username/colecao')
   list(
     @Param('username') username: string,
     @Query() query: Record<string, string | undefined>,
     @Req() req: RequestWithUser,
   ) {
-    // Rota deliberadamente aberta: sem login ela devolve a coleção se o perfil
-    // for público, e 404 se não for. Quem aplica a regra é o RLS.
+    // Rota aberta de propósito: o service decide entre a coleção e o 404 de perfil privado.
     return this.collection.findByUsername(
       username,
       parseFilters(query),
@@ -41,13 +38,12 @@ export class CollectionController {
     )
   }
 
-  /** POST /api/colecao */
   @Post('colecao')
+  @UseGuards(EmailVerifiedGuard)
   add(@Body('albumId', ParseUUIDPipe) albumId: string, @Req() req: RequestWithUser) {
     return this.collection.add(requireUser(req), albumId)
   }
 
-  /** DELETE /api/colecao/:id */
   @Delete('colecao/:id')
   @HttpCode(204)
   remove(@Param('id', ParseUUIDPipe) id: string, @Req() req: RequestWithUser) {
@@ -62,11 +58,7 @@ function requireUser(req: RequestWithUser): string {
   return req.user.id
 }
 
-/**
- * Converte a query string no formato que o front monta em toQueryString().
- * Valores inválidos são descartados em silêncio em vez de virarem erro: um
- * filtro digitado errado na URL não deve quebrar a tela inteira.
- */
+/** Valores inválidos são descartados em silêncio: um filtro errado na URL não quebra a tela. */
 function parseFilters(query: Record<string, string | undefined>): CollectionFilters {
   const list = (value?: string) =>
     value ? value.split(',').map((v) => v.trim()).filter(Boolean) : []

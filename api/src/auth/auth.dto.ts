@@ -1,14 +1,10 @@
-// api/src/auth/auth.dto.ts
-
 import { IsEmail, IsString, Length, Matches, MinLength } from 'class-validator'
 
 export class RegisterDto {
   @IsEmail({}, { message: 'Informe um e-mail válido.' })
   email!: string
 
-  // 8 caracteres sem exigência de símbolo e maiúscula: as regras de
-  // composição levam a senhas previsíveis ("Senha1!") e estão fora das
-  // recomendações atuais do NIST. Comprimento é o que importa.
+  // Só comprimento: regras de composição levam a senhas previsíveis (NIST).
   @IsString()
   @MinLength(8, { message: 'A senha precisa ter pelo menos 8 caracteres.' })
   password!: string
@@ -34,4 +30,9 @@ export class UpdateProfileDto {
     message: 'O endereço do perfil aceita apenas letras minúsculas, números, hífen e sublinhado.',
   })
   username!: string
+}
+export class ConfirmEmailDto {
+  @IsString()
+  @Length(20, 200, { message: 'Link de confirmação inválido.' })
+  token!: string
 }

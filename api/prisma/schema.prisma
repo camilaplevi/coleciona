@@ -1,8 +1,5 @@
-// Coleciona — modelo de dados.
-//
-// Os nomes de tabela e coluna são snake_case porque as políticas de RLS em
-// prisma/migrations são escritas à mão, em SQL, e precisam citar os nomes
-// reais. Renomear um @@map aqui quebra aquele arquivo em silêncio.
+// Nomes snake_case: as políticas de RLS em prisma/migrations citam tabelas e colunas em SQL.
+// Renomear um @@map quebra aquelas migrações.
 
 generator client {
   provider = "prisma-client"
@@ -40,25 +37,26 @@ enum AlbumArtistRole {
   @@map("album_artist_role")
 }
 
-// ---------------------------------------------------------------------------
-// Conta e perfil
-// ---------------------------------------------------------------------------
 
-/// Credenciais. Fica fora do RLS de propósito — ver o comentário na migração
-/// de políticas. Nunca é exposta pela API.
+/// Credenciais. Fora do RLS de propósito: o cadastro cria a linha sem sessão. Nunca exposta pela API.
 model User {
   id           String   @id @default(uuid(7)) @db.Uuid
   email        String   @unique
   passwordHash String   @map("password_hash")
   createdAt    DateTime @default(now()) @map("created_at")
 
+  /// Nulo até a pessoa clicar no link do e-mail.
+  emailVerifiedAt            DateTime? @map("email_verified_at")
+  /// Hash SHA-256 do token. O token em claro só existe no link enviado por e-mail.
+  emailVerificationTokenHash String?   @unique @map("email_verification_token_hash")
+  emailVerificationExpiresAt DateTime? @map("email_verification_expires_at")
+
   profile Profile?
 
   @@map("users")
 }
 
-/// A parte pública da conta. Compartilha o id com User para que as políticas
-/// possam comparar `id = current_user_id()` sem um join.
+/// Parte pública da conta. Mesmo id de User: as políticas comparam id = current_user_id() sem join.
 model Profile {
   id             String    @id @db.Uuid
   username       String    @unique
@@ -67,8 +65,7 @@ model Profile {
   avatarUrl      String?   @map("avatar_url")
   isPublic       Boolean   @default(true) @map("is_public")
   favoriteItemId String?   @map("favorite_item_id") @db.Uuid
-  /// Null enquanto a pessoa não concluiu o onboarding. É este campo que o
-  /// front consulta para saber se manda para as perguntas ou para a home.
+  /// Nulo até concluir o onboarding; o front usa isso para decidir entre perguntas e home.
   onboardedAt    DateTime? @map("onboarded_at")
   createdAt      DateTime  @default(now()) @map("created_at")
 
@@ -107,14 +104,10 @@ model ProfileArtist {
   @@map("profile_artists")
 }
 
-// ---------------------------------------------------------------------------
-// Catálogo compartilhado
-// ---------------------------------------------------------------------------
 
 model Artist {
   id          String      @id @default(uuid(7)) @db.Uuid
-  /// Id do artista no Discogs. É por onde o import faz upsert em vez de criar
-  /// duplicata a cada busca — ver DiscogsService.importArtist.
+  /// Id no Discogs. É a chave do upsert do import, para não duplicar a cada busca.
   discogsId   Int         @unique @map("discogs_id")
   name        String
   /// Nome sem artigo inicial, para ordenar "Os Mutantes" em M.
@@ -154,8 +147,7 @@ model Album {
   @@map("albums")
 }
 
-/// Crédito de artista no disco. `position` preserva a ordem da capa, que não
-/// é alfabética nem derivável de nada.
+/// Crédito de artista no disco. `position` preserva a ordem da capa, que não é derivável.
 model AlbumArtist {
   albumId  String          @map("album_id") @db.Uuid
   artistId String          @map("artist_id") @db.Uuid
@@ -219,12 +211,8 @@ model SeriesAlbum {
   @@map("series_albums")
 }
 
-// ---------------------------------------------------------------------------
-// Coleção
-// ---------------------------------------------------------------------------
 
-/// Um disco na estante de alguém. A visibilidade é decidida pelo RLS, não por
-/// filtro de aplicação — ver CollectionService.
+/// Um disco na estante de alguém. A regra de visibilidade está em CollectionService.
 model CollectionItem {
   id         String     @id @default(uuid(7)) @db.Uuid
   ownerId    String     @map("owner_id") @db.Uuid
@@ -241,8 +229,7 @@ model CollectionItem {
 
   favoritedBy Profile[] @relation("FavoriteItem")
 
-  /// O mesmo disco não entra duas vezes na mesma estante — é este índice que
-  /// faz o P2002 tratado em CollectionService.add().
+  /// Um disco não entra duas vezes na mesma estante: o P2002 é tratado em CollectionService.add().
   @@unique([ownerId, albumId])
   @@index([ownerId, createdAt])
   @@map("collection_items")
