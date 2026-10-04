@@ -2,13 +2,17 @@
 // Manda só o que mudou: salvar sem alterações não grava nada.
 
 import { computed, reactive, ref } from 'vue'
+import AvatarUpload from '@/components/profile/AvatarUpload.vue'
 import FormField from '@/components/form/FormField.vue'
 import { updateMyAccount } from '@/services/profile'
 import { ApiError } from '@/services/http'
 import type { AccountUpdate, MyAccount } from '@/types/profile'
 
 const props = defineProps<{ account: MyAccount }>()
-const emit = defineEmits<{ saved: [account: MyAccount] }>()
+const emit = defineEmits<{
+  saved: [account: MyAccount]
+  avatarChanged: [avatarUrl: string | null]
+}>()
 
 const BIO_MAX = 280
 
@@ -16,7 +20,6 @@ const original = {
   displayName: props.account.displayName,
   username: props.account.username,
   bio: props.account.bio ?? '',
-  avatarUrl: props.account.avatarUrl ?? '',
   isPublic: props.account.isPublic,
 }
 
@@ -33,7 +36,6 @@ function validate(): boolean {
   errors.displayName = null
   errors.username = null
   errors.bio = null
-  errors.avatarUrl = null
 
   const name = form.displayName.trim()
   if (name.length < 2 || name.length > 60) errors.displayName = 'O nome precisa ter entre 2 e 60 caracteres.'
@@ -44,11 +46,6 @@ function validate(): boolean {
 
   if (form.bio.length > BIO_MAX) errors.bio = `A bio pode ter até ${BIO_MAX} caracteres.`
 
-  const avatar = form.avatarUrl.trim()
-  if (avatar && !/^https?:\/\/\S+$/.test(avatar)) {
-    errors.avatarUrl = 'Informe um endereço de imagem começando com http ou https.'
-  }
-
   return Object.values(errors).every((value) => !value)
 }
 
@@ -57,7 +54,6 @@ function changes(): AccountUpdate {
   if (form.displayName.trim() !== original.displayName) out.displayName = form.displayName.trim()
   if (form.username !== original.username) out.username = form.username
   if (form.bio.trim() !== original.bio) out.bio = form.bio.trim() || null
-  if (form.avatarUrl.trim() !== original.avatarUrl) out.avatarUrl = form.avatarUrl.trim() || null
   if (form.isPublic !== original.isPublic) out.isPublic = form.isPublic
   return out
 }
@@ -80,7 +76,6 @@ async function submit() {
       displayName: saved.displayName,
       username: saved.username,
       bio: saved.bio ?? '',
-      avatarUrl: saved.avatarUrl ?? '',
       isPublic: saved.isPublic,
     })
     feedback.value = 'Alterações salvas.'
@@ -106,6 +101,13 @@ async function submit() {
     <p class="mb-6 mt-1 text-[13px] text-ink-muted">
       O e-mail não muda por aqui. Ele é o que você usa para entrar.
     </p>
+
+    <AvatarUpload
+      class="mb-8"
+      :name="account.displayName"
+      :avatar-url="account.avatarUrl"
+      @changed="emit('avatarChanged', $event)"
+    />
 
     <div class="grid gap-5 sm:grid-cols-2">
       <FormField
@@ -138,16 +140,6 @@ async function submit() {
         <span id="bio-erro" class="text-accent">{{ errors.bio ?? '' }}</span>
         <span id="bio-contagem" class="text-ink-muted">{{ bioLeft }} caracteres restantes</span>
       </p>
-    </div>
-
-    <div class="mt-5">
-      <FormField
-        v-model="form.avatarUrl"
-        label="Foto de perfil (endereço da imagem)"
-        placeholder="https://..."
-        :hint="form.avatarUrl ? undefined : 'Deixe em branco para usar suas iniciais.'"
-        :error="errors.avatarUrl"
-      />
     </div>
 
     <label class="mt-6 flex cursor-pointer items-start gap-3">

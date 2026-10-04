@@ -65,6 +65,12 @@ function onSaved(saved: MyAccount) {
   profile.run()
 }
 
+function onAvatarChanged(avatarUrl: string | null) {
+  if (account.data.value) account.data.value = { ...account.data.value, avatarUrl }
+  if (auth.profile) auth.setProfile({ ...auth.profile, avatarUrl })
+  profile.run()
+}
+
 const stats = computed(() => profile.data.value?.stats)
 </script>
 
@@ -150,7 +156,11 @@ const stats = computed(() => profile.data.value?.stats)
         </section>
 
         <section v-else-if="tab === 'conta' && account.data.value" class="mt-8">
-          <AccountForm :account="account.data.value" @saved="onSaved" />
+          <AccountForm
+            :account="account.data.value"
+            @saved="onSaved"
+            @avatar-changed="onAvatarChanged"
+          />
         </section>
       </template>
     </main>

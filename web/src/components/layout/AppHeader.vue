@@ -92,7 +92,13 @@ async function signOut() {
           :aria-label="`Conta de ${auth.profile.displayName}`"
           @click="menuOpen = !menuOpen"
         >
-          {{ initials(auth.profile.displayName) }}
+          <img
+            v-if="auth.profile.avatarUrl"
+            :src="auth.profile.avatarUrl"
+            alt=""
+            class="size-9 rounded-full object-cover"
+          />
+          <template v-else>{{ initials(auth.profile.displayName) }}</template>
         </button>
 
         <!-- Camada invisível que fecha o menu ao clicar fora. -->

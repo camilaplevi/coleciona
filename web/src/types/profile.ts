@@ -51,7 +51,6 @@ export interface MyAccount {
 export interface AccountUpdate {
   displayName?: string
   bio?: string | null
-  avatarUrl?: string | null
   isPublic?: boolean
   username?: string
 }
