@@ -1,9 +1,5 @@
 <script setup lang="ts">
-// web/src/components/layout/AppHeader.vue
-//
-// Cabeçalho compartilhado. Mesma estrutura da spec do Figma — marca,
-// navegação, busca e ações de conta — com as duas variantes previstas lá:
-// visitante e autenticado.
+// Cabeçalho compartilhado, com as variantes de visitante e de conta autenticada.
 
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -51,16 +47,15 @@ async function signOut() {
           Explorar
         </RouterLink>
 
-        <!-- O link da coleção só existe com conta: para visitante ele levaria
-             a um 404 ou a um login disfarçado de navegação. -->
+        <!-- Link da coleção só existe com conta: para visitante levaria a um 404. -->
         <RouterLink
           v-if="auth.isAuthenticated && auth.profile"
-          :to="`/perfis/${auth.profile.username}`"
+          to="/meu-perfil"
           class="flex h-full items-center border-b-2 border-transparent text-ink-soft
                  transition-colors hover:text-ink"
           active-class="border-accent text-ink"
         >
-          Minha coleção
+          Meu perfil
         </RouterLink>
       </nav>
 
@@ -87,7 +82,6 @@ async function signOut() {
         />
       </div>
 
-      <!-- Autenticado -->
       <div v-if="auth.isAuthenticated && auth.profile" class="relative shrink-0">
         <button
           type="button"
@@ -101,9 +95,7 @@ async function signOut() {
           {{ initials(auth.profile.displayName) }}
         </button>
 
-        <!-- Camada que fecha o menu ao clicar fora. Um listener global em
-             document faria o mesmo, mas vazaria se o componente sair da
-             árvore antes do cleanup. -->
+        <!-- Camada invisível que fecha o menu ao clicar fora. -->
         <div v-if="menuOpen" class="fixed inset-0 z-40" @click="menuOpen = false" />
 
         <div
@@ -122,13 +114,13 @@ async function signOut() {
           </p>
 
           <RouterLink
-            :to="`/perfis/${auth.profile.username}`"
+            to="/meu-perfil"
             role="menuitem"
             class="block px-4 py-2.5 text-sm text-ink-soft transition-colors hover:bg-inset
                    hover:text-ink"
             @click="menuOpen = false"
           >
-            Minha coleção
+            Meu perfil
           </RouterLink>
 
           <RouterLink
@@ -153,7 +145,6 @@ async function signOut() {
         </div>
       </div>
 
-      <!-- Visitante -->
       <div v-else class="flex shrink-0 items-center gap-1">
         <RouterLink
           to="/entrar"

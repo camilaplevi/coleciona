@@ -14,6 +14,17 @@ const routes: RouteRecordRaw[] = [
     meta: { apenasVisitante: true },
   },
   {
+    path: '/meu-perfil',
+    name: 'meu-perfil',
+    component: () => import('@/pages/ProfileView.vue'),
+    meta: { exigeConta: true },
+  },
+  {
+    path: '/perfis/:username',
+    name: 'perfil',
+    component: () => import('@/pages/ProfileView.vue'),
+  },
+  {
     path: '/onboarding',
     name: 'onboarding',
     component: () => import('@/pages/OnboardingView.vue'),
