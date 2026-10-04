@@ -11,9 +11,8 @@ const props = withDefaults(
     readonly?: boolean
     /** Aguardando a resposta do servidor depois do clique em adicionar. */
     pending?: boolean
-    size?: 'md' | 'lg'
   }>(),
-  { owned: false, readonly: false, pending: false, size: 'md' },
+  { owned: false, readonly: false, pending: false },
 )
 
 const emit = defineEmits<{
@@ -69,13 +68,7 @@ const meta = computed(() => {
     </div>
 
     <div class="flex flex-col gap-0.5">
-      <h3
-        :class="
-          size === 'lg'
-            ? 'font-display text-2xl leading-tight text-ink'
-            : 'text-[15px] font-medium leading-snug text-ink'
-        "
-      >
+      <h3 class="text-[14px] font-medium leading-snug text-ink">
         <a
           :href="`/album/${album.id}`"
           class="after:absolute after:inset-0 after:content-['']"

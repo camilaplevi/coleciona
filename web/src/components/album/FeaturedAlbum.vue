@@ -31,11 +31,11 @@ const meta = computed(() => {
 <template>
   <section
     :aria-labelledby="titleId"
-    class="grid items-center gap-8 md:grid-cols-[minmax(0,360px)_1fr] md:gap-14"
+    class="grid items-center gap-8 md:grid-cols-[minmax(0,260px)_1fr] md:gap-14"
   >
     <button
       type="button"
-      class="block w-full max-w-[360px]"
+      class="block w-full max-w-[260px]"
       :aria-label="`Ver detalhes de ${album.title}`"
       @click="emit('openAlbum', album.id)"
     >

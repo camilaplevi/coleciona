@@ -5,9 +5,11 @@ import FeaturedAlbum from '@/components/album/FeaturedAlbum.vue'
 import AlbumGrid from '@/components/Albumgrid.vue'
 import StateMessage from '@/components/feedback/StateMessage.vue'
 import AppToast, { type Toast } from '@/components/feedback/AppToast.vue'
+import DiscogsReleaseList from '@/components/discogs/DiscogsReleaseList.vue'
 import { useAsync } from '@/composables/useAsync'
 import { fetchAlbums, fetchHome } from '@/services/catalog'
 import { addToCollection } from '@/services/collection'
+import { importDiscogsRelease, searchDiscogsReleases } from '@/services/discogs'
 import { ApiError } from '@/services/http'
 import { describeError } from '@/utils/describeError'
 import type { StyleRef } from '@/types/catalog'
@@ -43,11 +45,16 @@ const resultsCount = computed(() => {
   return total === 1 ? '1 disco' : `${total} discos`
 })
 
+const discogs = useAsync((signal) => searchDiscogsReleases(query.value, signal))
+
 let timer: ReturnType<typeof setTimeout> | undefined
 watch(query, () => {
   clearTimeout(timer)
   if (!isBrowsing.value) return
-  timer = setTimeout(() => results.run(), 300)
+  timer = setTimeout(() => {
+    results.run()
+    if (query.value && !activeStyle.value) discogs.run()
+  }, 300)
 })
 
 function browseStyle(style: StyleRef) {
@@ -64,12 +71,11 @@ function backToHome() {
 
 onMounted(() => home.run())
 
-// ---------------------------------------------------------------------------
-// Coleção
-// ---------------------------------------------------------------------------
 
 const ownedIds = ref(new Set<string>())
 const pendingId = ref<string | null>(null)
+const pendingDiscogsId = ref<number | null>(null)
+const addedDiscogsIds = ref(new Set<number>())
 const toast = ref<Toast | null>(null)
 
 function absorbOwned(ids: string[] | undefined) {
@@ -113,6 +119,33 @@ async function handleAdd(albumId: string) {
   }
 }
 
+/** Disco do Discogs: grava no catálogo e, em seguida, segue o fluxo normal de coleção. */
+async function handleDiscogsAdd(discogsId: number) {
+  pendingDiscogsId.value = discogsId
+
+  try {
+    const album = await importDiscogsRelease(discogsId)
+    await handleAdd(album.id)
+    if (ownedIds.value.has(album.id)) {
+      addedDiscogsIds.value = new Set([...addedDiscogsIds.value, discogsId])
+    }
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.needsAuth) {
+      promptSignup()
+      return
+    }
+    toast.value = {
+      message:
+        cause instanceof ApiError && cause.kind !== 'server'
+          ? cause.message
+          : 'Não foi possível importar este disco agora. Tente de novo em instantes.',
+      tone: 'error',
+    }
+  } finally {
+    pendingDiscogsId.value = null
+  }
+}
+
 function openAlbum(id: string) {
   console.info('abrir álbum', id)
 }
@@ -127,9 +160,6 @@ function openArtist(id: string) {
     <AppHeader v-model:search="searchTerm" />
 
     <main class="mx-auto max-w-[1200px] px-6 pb-28 pt-10 md:pt-14">
-      <!-- ============================================================== -->
-      <!-- Resultados: busca ou "ver todos" de um estilo                    -->
-      <!-- ============================================================== -->
       <section v-if="isBrowsing" aria-labelledby="titulo-resultados">
         <div class="mb-10 flex flex-wrap items-end justify-between gap-4 border-b border-hairline pb-6">
           <div>
@@ -177,11 +207,20 @@ function openArtist(id: string) {
           @open-album="openAlbum"
           @open-artist="openArtist"
         />
+
+        <DiscogsReleaseList
+          v-if="query && !activeStyle"
+          class="mt-16"
+          :releases="discogs.data.value ?? []"
+          :loading="discogs.loading.value"
+          :error="discogs.error.value"
+          :pending-id="pendingDiscogsId"
+          :added-ids="addedDiscogsIds"
+          @add="handleDiscogsAdd"
+          @retry="discogs.run()"
+        />
       </section>
 
-      <!-- ============================================================== -->
-      <!-- Página inicial                                                   -->
-      <!-- ============================================================== -->
       <template v-else>
         <h1 class="sr-only">Explorar o catálogo</h1>
 
@@ -192,11 +231,10 @@ function openArtist(id: string) {
           @action="home.run()"
         />
 
-        <!-- Esqueleto só na primeira carga. Numa nova tentativa, o conteúdo
-             anterior continua na tela em vez de piscar. -->
+        <!-- Esqueleto só na primeira carga: numa nova tentativa, o conteúdo anterior fica na tela. -->
         <div v-else-if="home.loading.value && !home.data.value" aria-busy="true">
-          <div class="mb-20 grid items-center gap-8 md:grid-cols-[minmax(0,360px)_1fr] md:gap-14">
-            <div class="aspect-square w-full max-w-[360px] animate-pulse rounded-cover bg-inset" />
+          <div class="mb-20 grid items-center gap-8 md:grid-cols-[minmax(0,260px)_1fr] md:gap-14">
+            <div class="aspect-square w-full max-w-[260px] animate-pulse rounded-cover bg-inset" />
             <div class="space-y-4">
               <div class="h-4 w-32 animate-pulse rounded bg-inset" />
               <div class="h-12 w-3/4 animate-pulse rounded bg-inset" />
@@ -226,7 +264,7 @@ function openArtist(id: string) {
           />
 
           <section
-            v-for="(section, index) in sections"
+            v-for="section in sections"
             :key="section.style.id"
             :aria-labelledby="`secao-${section.style.slug}`"
             class="mb-16 border-t border-hairline pt-8 md:mb-20"
@@ -245,14 +283,12 @@ function openArtist(id: string) {
                 @click="browseStyle(section.style)"
               >
                 Ver todos
-                <!-- Sem isto, o leitor de tela anuncia quatro "Ver todos"
-                     idênticos e a pessoa não sabe qual é qual. -->
+                <!-- Sem o sr-only, o leitor de tela anuncia quatro "Ver todos" iguais. -->
                 <span class="sr-only">os discos de {{ section.style.name }}</span>
               </button>
             </div>
 
             <AlbumGrid
-              :variant="index === 0 ? 'editorial' : 'grid'"
               :albums="section.albums"
               :owned-ids="ownedIds"
               :pending-id="pendingId"

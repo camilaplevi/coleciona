@@ -17,8 +17,6 @@ withDefaults(
      skeletonCount?: number
     emptyTitle?: string
     emptyDescription?: string
-    /** 'editorial': o primeiro disco ocupa 2×2 e os outros quatro fecham o bloco. */
-    variant?: 'grid' | 'editorial'
   }>(),
   {
     ownedIds: () => new Set<string>(),
@@ -28,7 +26,6 @@ withDefaults(
     skeletonCount: 5,
     emptyTitle: 'Nenhum disco por aqui ainda',
     emptyDescription: undefined,
-    variant: 'grid',
   },
 )
 
@@ -40,12 +37,11 @@ defineEmits<{
 </script>
 
 <template>
-  <!-- auto-fill com minmax mantém a grade legível em qualquer largura sem
-       ponto de quebra manual. Reproduz o que a spec do Figma descreve. -->
+  <!-- Grade responsiva sem ponto de quebra manual: auto-fill com minmax. -->
   <div
     v-if="loading"
-    class="grid gap-6"
-    style="grid-template-columns: repeat(auto-fill, minmax(180px, 1fr))"
+    class="grid gap-5"
+    style="grid-template-columns: repeat(auto-fill, minmax(150px, 1fr))"
     aria-busy="true"
   >
     <div v-for="n in skeletonCount" :key="n" class="flex flex-col gap-3">
@@ -64,28 +60,9 @@ defineEmits<{
   />
 
   <div
-    v-else-if="variant === 'editorial'"
-    class="grid grid-cols-2 items-start gap-6 md:grid-cols-4"
-  >
-    <AlbumCard
-      v-for="(album, index) in albums"
-      :key="album.id"
-      :album="album"
-      :size="index === 0 ? 'lg' : 'md'"
-      :class="index === 0 ? 'col-span-2 md:row-span-2' : ''"
-      :owned="ownedIds.has(album.id)"
-      :pending="pendingId === album.id"
-      :readonly="readonly"
-      @add="$emit('add', $event)"
-      @open-album="$emit('openAlbum', $event)"
-      @open-artist="$emit('openArtist', $event)"
-    />
-  </div>
-
-  <div
     v-else
-    class="grid gap-6"
-    style="grid-template-columns: repeat(auto-fill, minmax(180px, 1fr))"
+    class="grid gap-5"
+    style="grid-template-columns: repeat(auto-fill, minmax(150px, 1fr))"
   >
     <AlbumCard
       v-for="album in albums"
