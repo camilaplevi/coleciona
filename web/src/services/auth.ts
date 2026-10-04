@@ -30,12 +30,7 @@ export function logout(): Promise<void> {
   return request<void>('/auth/sessao', { method: 'DELETE' })
 }
 
-/**
- * Perfil da sessão atual.
- *
- * Responde 401 para visitante, e isso é informação, não falha: quem chama
- * trata como "ninguém logado" e segue mostrando o catálogo.
- */
+/** 401 aqui é resposta normal para visitante, não falha: quem chama mostra o catálogo. */
 export function fetchMe(signal?: AbortSignal): Promise<Profile> {
   return request<Profile>('/auth/eu', { signal })
 }
@@ -45,4 +40,15 @@ export function updateUsername(username: string): Promise<Profile> {
     method: 'PATCH',
     body: JSON.stringify({ username }),
   })
+}
+/** Confirma o e-mail com o token do link. Não exige sessão. */
+export function confirmEmail(token: string): Promise<void> {
+  return request<void>('/auth/confirmar', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  })
+}
+
+export function resendConfirmation(): Promise<void> {
+  return request<void>('/auth/reenviar-confirmacao', { method: 'POST' })
 }

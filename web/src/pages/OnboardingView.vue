@@ -1,8 +1,5 @@
 <script setup lang="ts">
-// Perguntas de preferência em etapas — direção C da spec do Figma.
-// Duas etapas, porque são dois dados que o back-end guarda: estilos e
-// artistas. Uma terceira seria tela de boas-vindas, que só aumenta a
-// desistência no meio do caminho.
+// Duas etapas, estilos e artistas: os dois dados que o back guarda. Uma tela a mais só aumentaria a desistência.
 
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -30,15 +27,12 @@ const options = useAsync((signal) => fetchOptions(signal))
 const styles = computed(() => options.data.value?.styles ?? [])
 const artists = computed(() => options.data.value?.artists ?? [])
 
-// Pelo menos um estilo: sem nenhum, a personalização não tem o que ordenar e
-// o back-end recusa. Melhor travar aqui, com o motivo visível.
+// Estilo é obrigatório: sem ele a personalização não tem o que ordenar, e o back recusa.
 const canAdvance = computed(() => step.value !== 1 || selectedStyles.value.size > 0)
 
 onMounted(() => options.run())
 
-// Devolve um Set novo em vez de mutar: o ref não percebe um .add() no mesmo
-// objeto. Recebe o valor já desembrulhado, porque o template passa o ref
-// destravado — por isso a atribuição fica no template, não aqui.
+// Set novo, não mutação: o ref não percebe .add(). O template passa o ref já destravado, então a atribuição fica lá.
 function toggled(current: Set<string>, id: string): Set<string> {
   const next = new Set(current)
   if (next.has(id)) next.delete(id)
@@ -78,11 +72,13 @@ async function advance() {
   }
 }
 
-/**
- * Pular é saída legítima: a home cai no comportamento padrão. Obrigar a
- * escolher só produz cliques aleatórios, que envenenam a personalização em
- * vez de alimentá-la.
- */
+/** Sai sem gravar nada; as perguntas continuam em "Meus estilos e artistas". */
+function later() {
+  auth.deferOnboarding()
+  router.push('/')
+}
+
+/** Marca como concluído sem preferências: forçar a escolha só polui a personalização. */
 async function skip() {
   submitting.value = true
 
@@ -129,7 +125,6 @@ async function skip() {
       <template v-else>
         <p class="mb-2 text-[13px] text-ink-muted">Etapa {{ step }} de {{ TOTAL_STEPS }}</p>
 
-        <!-- ============================== Etapa 1 ============================== -->
         <fieldset v-if="step === 1" class="border-0 p-0">
           <legend class="mb-2 font-display text-[28px] leading-tight text-ink">
             Quais estilos você coleciona?
@@ -167,7 +162,6 @@ async function skip() {
           </p>
         </fieldset>
 
-        <!-- ============================== Etapa 2 ============================== -->
         <fieldset v-else class="border-0 p-0">
           <legend class="mb-2 font-display text-[28px] leading-tight text-ink">
             Algum artista que você já segue?
@@ -254,16 +248,31 @@ async function skip() {
             Voltar
           </button>
 
-          <button
-            type="button"
-            class="ml-auto text-[13px] text-ink-muted underline-offset-4 transition-colors
-                   hover:text-ink-soft hover:underline"
-            :disabled="submitting"
-            @click="skip"
-          >
-            Pular por agora
-          </button>
+          <div class="ml-auto flex items-center gap-4">
+            <button
+              type="button"
+              class="h-11 rounded-control px-3 text-sm text-ink-soft transition-colors hover:text-ink"
+              :disabled="submitting"
+              @click="later"
+            >
+              Fazer depois
+            </button>
+
+            <button
+              type="button"
+              class="text-[13px] text-ink-muted underline-offset-4 transition-colors
+                     hover:text-ink-soft hover:underline"
+              :disabled="submitting"
+              @click="skip"
+            >
+              Pular perguntas
+            </button>
+          </div>
         </div>
+
+        <p class="mt-4 text-[13px] leading-5 text-ink-muted">
+          "Fazer depois" não salva nada. Você responde quando quiser, em Meus estilos e artistas.
+        </p>
       </template>
     </div>
   </div>

@@ -4,18 +4,32 @@ import type { Profile } from '@/types/catalog'
 import * as authService from '@/services/auth'
 import { ApiError } from '@/services/http'
 
+// Flag de onboarding adiado: vale só na aba, então recarregar não reabre o onboarding à força.
+const DEFERRED_KEY = 'coleciona:onboarding-adiado'
+
+function readDeferred(): boolean {
+  try {
+    return sessionStorage.getItem(DEFERRED_KEY) === '1'
+  } catch {
+    // Sem a flag, o pior caso é o onboarding reaparecer, nunca uma tela presa.
+    return false
+  }
+}
+
 export const useAuthStore = defineStore('auth', () => {
   const profile = ref<Profile | null>(null)
   const ready = ref(false)
+  const onboardingDeferred = ref(readDeferred())
 
   const isAuthenticated = computed(() => profile.value !== null)
+  const needsVerification = computed(
+    () => profile.value !== null && !profile.value.emailVerified,
+  )
   const needsOnboarding = computed(
     () => profile.value !== null && !profile.value.hasOnboarded,
   )
 
-  // A promessa é guardada para que chamadas simultâneas compartilhem a mesma
-  // verificação. Sem isto, o guard de rota e o App.vue disparariam dois
-  // GET /auth/eu no carregamento.
+  // Promessa compartilhada: o guard de rota e o App não disparam dois GET /auth/eu.
   let verification: Promise<void> | null = null
 
   /** Verifica a sessão uma única vez por carregamento da página. */
@@ -55,9 +69,23 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       await authService.logout()
     } finally {
-      // Limpa o estado local mesmo se a chamada falhar: para quem clicou em
-      // sair, continuar parecendo logada é pior do que um cookie órfão.
+      // Limpa o estado mesmo se a chamada falhar: parecer logada é pior que um cookie órfão.
       profile.value = null
+      onboardingDeferred.value = false
+      try {
+        sessionStorage.removeItem(DEFERRED_KEY)
+      } catch {
+      }
+    }
+  }
+
+  /** Sai do onboarding sem responder. Não marca nada no servidor. */
+  function deferOnboarding(): void {
+    onboardingDeferred.value = true
+    try {
+      sessionStorage.setItem(DEFERRED_KEY, '1')
+    } catch {
+      // Sem storage, vale só nesta tela.
     }
   }
 
@@ -65,6 +93,13 @@ export const useAuthStore = defineStore('auth', () => {
   function markOnboarded(): void {
     if (profile.value) {
       profile.value = { ...profile.value, hasOnboarded: true }
+    }
+  }
+
+  /** Chamado ao confirmar o e-mail, sem precisar buscar a sessão de novo. */
+  function markVerified(): void {
+    if (profile.value) {
+      profile.value = { ...profile.value, emailVerified: true }
     }
   }
 
@@ -76,12 +111,16 @@ export const useAuthStore = defineStore('auth', () => {
     profile,
     ready,
     isAuthenticated,
+    needsVerification,
     needsOnboarding,
+    onboardingDeferred,
+    deferOnboarding,
     load,
     register,
     login,
     logout,
     markOnboarded,
+    markVerified,
     setProfile,
   }
 })

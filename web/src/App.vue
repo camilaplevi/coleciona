@@ -1,8 +1,9 @@
 <script setup lang="ts">
-// Casca da aplicação: cada tela entra pelo router, então o App só precisa
-// de um ponto de saída para elas.
+import VerifyEmailBanner from '@/components/feedback/VerifyEmailBanner.vue'
+// Casca da aplicação: cada tela entra pelo router.
 </script>
 
 <template>
+  <VerifyEmailBanner />
   <RouterView />
 </template>

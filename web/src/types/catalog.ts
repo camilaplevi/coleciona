@@ -1,9 +1,4 @@
-/**
- * Coleciona — tipos de domínio.
- *
- * Espelham o schema, mas não são uma cópia dele: a UI trabalha com formas já
- * achatadas, para o componente não precisar navegar por três níveis de join.
- */
+/** Tipos de domínio. A UI recebe formas já achatadas, sem três níveis de join. */
 
 export type ArticleForm = 'masculino' | 'feminino' | 'banda'
 
@@ -34,10 +29,7 @@ export interface SeriesRef {
   volume: string | null
 }
 
-/**
- * O que o AlbumCard precisa saber, e nada além disso.
- * Manter este tipo pequeno é o que impede o card de virar acoplado à query.
- */
+/** Só o que o card precisa. Manter pequeno evita acoplar o card à query. */
 export interface AlbumSummary {
   id: string
   title: string
@@ -57,7 +49,6 @@ export interface Album extends AlbumSummary {
   styles: StyleRef[]
 }
 
-/** Um disco na estante de alguém. */
 export interface CollectionItem {
   id: string
   ownerId: string
@@ -67,7 +58,6 @@ export interface CollectionItem {
   acquiredAt: string | null
 }
 
-/** Um grupo da tela de coleção: cabeçalho de artista mais os discos dele. */
 export interface ArtistGroup {
   artist: ArtistRef
   items: CollectionItem[]
@@ -82,6 +72,8 @@ export interface Profile {
   isPublic: boolean
   favoriteItemId: string | null
   hasOnboarded: boolean
+  /** Falso até a pessoa clicar no link enviado por e-mail. */
+  emailVerified: boolean
 }
 
 /** Estado dos filtros da tela de coleção. Vira query string na URL. */

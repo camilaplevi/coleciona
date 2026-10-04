@@ -14,6 +14,13 @@ const routes: RouteRecordRaw[] = [
     meta: { apenasVisitante: true },
   },
   {
+    path: '/confirmar-email',
+    name: 'confirmar-email',
+    component: () => import('@/pages/ConfirmEmailView.vue'),
+    // Pública de propósito: quem clica no link pode estar sem sessão.
+    meta: { publica: true },
+  },
+  {
     path: '/meu-perfil',
     name: 'meu-perfil',
     component: () => import('@/pages/ProfileView.vue'),
@@ -23,6 +30,7 @@ const routes: RouteRecordRaw[] = [
     path: '/perfis/:username',
     name: 'perfil',
     component: () => import('@/pages/ProfileView.vue'),
+    meta: { publica: true },
   },
   {
     path: '/onboarding',
@@ -41,9 +49,7 @@ export const router = createRouter({
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
 
-  // Espera a verificação de sessão antes de decidir. Sem isto, recarregar a
-  // página em /onboarding redirecionaria para a home, porque no primeiro
-  // instante a store ainda não sabe que existe sessão.
+  // Espera a sessão antes de decidir: sem isso, recarregar /onboarding mandaria para a home.
   await auth.load()
 
   if (to.meta.exigeConta && !auth.isAuthenticated) {
@@ -55,9 +61,13 @@ router.beforeEach(async (to) => {
     return auth.needsOnboarding ? { name: 'onboarding' } : { name: 'inicio' }
   }
 
-  // Onboarding pendente intercepta a navegação uma única vez. Quem pulou tem
-  // hasOnboarded true, então não cai mais aqui — pular precisa ser definitivo.
-  if (auth.needsOnboarding && to.name !== 'onboarding') {
+  // Onboarding pendente intercepta a navegação, exceto se foi adiado nesta sessão.
+  if (
+    auth.needsOnboarding &&
+    !auth.onboardingDeferred &&
+    to.name !== 'onboarding' &&
+    !to.meta.publica
+  ) {
     return { name: 'onboarding' }
   }
 
