@@ -1,5 +1,3 @@
-// api/src/collection/collection.service.ts
-
 import {
   ConflictException,
   Injectable,
@@ -21,11 +19,7 @@ export interface CollectionFilters {
 export class CollectionService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /**
-   * Coleção de um perfil. Serve tanto o dono quanto o visitante — quem decide
-   * o que aparece é o RLS, não este método. Por isso `viewerId` é só repassado
-   * e nunca usado numa condição aqui.
-   */
+  // viewerId entra na checagem de visibilidade e no contexto de RLS das consultas.
   async findByUsername(
     username: string,
     filters: CollectionFilters,
@@ -35,13 +29,12 @@ export class CollectionService {
 
     const profile = await db.profile.findUnique({
       where: { username: username.toLowerCase() },
-      select: { id: true },
+      select: { id: true, isPublic: true },
     })
 
-    // Perfil privado e perfil inexistente devolvem o mesmo 404 de propósito:
-    // responder 403 para um e 404 para o outro revelaria quais usernames
-    // existem no sistema.
-    if (!profile) {
+    // Privado e inexistente devolvem o mesmo 404: outra resposta revelaria quais usernames existem.
+    // A checagem é explícita: a conexão da API tem BYPASSRLS e o banco não esconde perfis privados.
+    if (!profile || (!profile.isPublic && viewerId !== profile.id)) {
       throw new NotFoundException('Perfil não encontrado.')
     }
 
@@ -86,9 +79,7 @@ export class CollectionService {
   async remove(ownerId: string, itemId: string): Promise<void> {
     const db = this.prisma.forUser(ownerId)
 
-    // deleteMany em vez de delete: com RLS, apagar algo de outra pessoa
-    // simplesmente não afeta nenhuma linha, e o count nos diz isso sem
-    // precisar de uma consulta prévia de verificação.
+    // deleteMany, não delete: se o item for de outra pessoa, count é 0 e nada vaza.
     const { count } = await db.collectionItem.deleteMany({
       where: { id: itemId, ownerId },
     })
@@ -103,8 +94,6 @@ export class CollectionService {
 
     if (filters.search) {
       const contains = filters.search
-      // Um campo de busca só, atravessando álbum, gravadora e artista —
-      // é o comportamento que a tela promete.
       conditions.push({
         OR: [
           { title: { contains, mode: 'insensitive' } },
@@ -147,9 +136,7 @@ export class CollectionService {
         return { album: { releaseYear: 'desc' } }
       case 'adicionado-desc':
         return { createdAt: 'desc' }
-      // 'artista-az' cai aqui de propósito: o agrupamento por artista é feito
-      // no front (groupByArtist), e ordenar por título já deixa os discos
-      // dentro de cada grupo em ordem estável antes do reordenamento por ano.
+      // 'artista-az' cai no default de propósito: o agrupamento por artista é feito no front.
       case 'artista-az':
       case 'album-az':
       default:
