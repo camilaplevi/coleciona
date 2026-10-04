@@ -1,8 +1,17 @@
-import { ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common'
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common'
 import { uniqueConflictField } from '../common/prisma-errors.js'
 import { PrismaService } from '../prisma/prisma.service.js'
 import { computeStats, type StatsInputItem } from './profile.stats.js'
 import type { UpdateAccountDto } from './profile.dto.js'
+
+/** Limite da foto depois de decodificada. Com 256px e compressão, a imagem fica bem abaixo disso. */
+const MAX_AVATAR_BYTES = 100_000
 
 /** Campos do perfil expostos à tela. O e-mail só aparece em myAccount. */
 const PROFILE_SELECT = {
@@ -56,7 +65,6 @@ export class ProfileService {
     const data: Record<string, unknown> = {}
     if (dto.displayName !== undefined) data.displayName = dto.displayName.trim()
     if (dto.bio !== undefined) data.bio = dto.bio?.trim() || null
-    if (dto.avatarUrl !== undefined) data.avatarUrl = dto.avatarUrl?.trim() || null
     if (dto.isPublic !== undefined) data.isPublic = dto.isPublic
     if (dto.username !== undefined) data.username = dto.username
 
@@ -74,6 +82,36 @@ export class ProfileService {
       }
       throw error
     }
+  }
+
+  /** Troca a foto. Confere a assinatura dos bytes: o tipo declarado pelo cliente não basta. */
+  async setAvatar(userId: string, dataUrl: string) {
+    const match = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(dataUrl)
+    if (!match) {
+      throw new BadRequestException('Envie uma imagem JPEG, PNG ou WebP.')
+    }
+
+    const bytes = Buffer.from(match[2], 'base64')
+    if (bytes.length > MAX_AVATAR_BYTES) {
+      throw new BadRequestException('A imagem é grande demais. Escolha uma foto menor.')
+    }
+    if (!hasImageSignature(bytes, match[1])) {
+      throw new BadRequestException('O arquivo não parece ser uma imagem JPEG, PNG ou WebP.')
+    }
+
+    await this.prisma.forUser(userId).profile.update({
+      where: { id: userId },
+      data: { avatarUrl: dataUrl },
+    })
+    return this.myAccount(userId)
+  }
+
+  async removeAvatar(userId: string) {
+    await this.prisma.forUser(userId).profile.update({
+      where: { id: userId },
+      data: { avatarUrl: null },
+    })
+    return this.myAccount(userId)
   }
 
   // Visitante, dono e terceiros seguem o mesmo caminho; a visibilidade é checada abaixo.
@@ -127,4 +165,10 @@ function ownProfileView(profile: {
     isPublic: profile.isPublic,
     memberSince: profile.createdAt.toISOString(),
   }
+}
+
+function hasImageSignature(bytes: Buffer, mime: string): boolean {
+  if (mime === 'image/jpeg') return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+  if (mime === 'image/png') return bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  return bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP'
 }
