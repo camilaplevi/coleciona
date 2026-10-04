@@ -37,7 +37,6 @@ enum AlbumArtistRole {
   @@map("album_artist_role")
 }
 
-
 /// Credenciais. Fora do RLS de propósito: o cadastro cria a linha sem sessão. Nunca exposta pela API.
 model User {
   id           String   @id @default(uuid(7)) @db.Uuid
@@ -104,7 +103,6 @@ model ProfileArtist {
   @@map("profile_artists")
 }
 
-
 model Artist {
   id          String      @id @default(uuid(7)) @db.Uuid
   /// Id no Discogs. É a chave do upsert do import, para não duplicar a cada busca.
@@ -125,26 +123,44 @@ model Artist {
 }
 
 model Album {
-  id            String   @id @default(uuid(7)) @db.Uuid
-  title         String
+  id               String   @id @default(uuid(7)) @db.Uuid
+  title            String
   /// Título normalizado para ordenação alfabética (buildOrderBy usa este).
-  sortTitle     String   @map("sort_title")
-  releaseYear   Int?     @map("release_year")
-  label         String?
-  coverUrl      String?  @map("cover_url")
+  sortTitle        String   @map("sort_title")
+  releaseYear      Int?     @map("release_year")
+  label            String?
+  coverUrl         String?  @map("cover_url")
   /// Coletânea de vários artistas: o card mostra "Vários artistas".
-  isCompilation Boolean  @default(false) @map("is_compilation")
-  createdAt     DateTime @default(now()) @map("created_at")
+  isCompilation    Boolean  @default(false) @map("is_compilation")
+  /// Id do release no Discogs. Chave do import: impede duplicar um disco a cada busca.
+  discogsReleaseId Int?     @unique @map("discogs_release_id")
+  createdAt        DateTime @default(now()) @map("created_at")
 
   artists         AlbumArtist[]
   styles          AlbumStyle[]
   seriesAlbums    SeriesAlbum[]
   collectionItems CollectionItem[]
+  tracks          Track[]
 
   @@index([sortTitle])
   @@index([label])
   @@index([releaseYear])
   @@map("albums")
+}
+
+/// Faixa de um disco, na ordem do Discogs (posições como "A1" ou "B2").
+model Track {
+  id        String  @id @default(uuid(7)) @db.Uuid
+  albumId   String  @map("album_id") @db.Uuid
+  position  String
+  title     String
+  duration  String?
+  sortOrder Int     @map("sort_order")
+
+  album Album @relation(fields: [albumId], references: [id], onDelete: Cascade)
+
+  @@index([albumId, sortOrder])
+  @@map("tracks")
 }
 
 /// Crédito de artista no disco. `position` preserva a ordem da capa, que não é derivável.
@@ -210,7 +226,6 @@ model SeriesAlbum {
   @@index([albumId])
   @@map("series_albums")
 }
-
 
 /// Um disco na estante de alguém. A regra de visibilidade está em CollectionService.
 model CollectionItem {

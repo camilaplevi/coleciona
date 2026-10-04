@@ -1,5 +1,3 @@
-// api/src/discogs/discogs.controller.ts
-
 import {
   BadRequestException,
   Controller,
@@ -14,7 +12,6 @@ import {
 import type { Request } from 'express'
 import { DiscogsService } from './discogs.service.js'
 
-/** Formato que o guard de autenticação vai anexar à requisição. */
 interface RequestWithUser extends Request {
   user?: { id: string }
 }
@@ -23,7 +20,6 @@ interface RequestWithUser extends Request {
 export class DiscogsController {
   constructor(private readonly discogs: DiscogsService) {}
 
-  /** GET /api/discogs/artistas?busca=... */
   @Get('artistas')
   search(@Query('busca') busca?: string) {
     const query = busca?.trim()
@@ -33,15 +29,27 @@ export class DiscogsController {
     return this.discogs.searchArtists(query)
   }
 
-  /**
-   * POST /api/discogs/artistas/:discogsId/importar
-   *
-   * Escrita no catálogo compartilhado — exige login, igual a POST /colecao.
-   * Quem decide se a escrita é permitida no fim das contas é o RLS.
-   */
+  // Escrita no catálogo compartilhado: exige login, como POST /colecao.
   @Post('artistas/:discogsId/importar')
   import(@Param('discogsId', ParseIntPipe) discogsId: number, @Req() req: RequestWithUser) {
     return this.discogs.importArtist(discogsId, requireUser(req))
+  }
+
+  /** GET /api/discogs/discos?busca=&pagina= — discos de vinil, para o que ainda não está no catálogo. */
+  @Get('discos')
+  searchReleases(@Query('busca') busca?: string, @Query('pagina') pagina?: string) {
+    const query = busca?.trim()
+    if (!query) {
+      throw new BadRequestException('Informe um termo de busca.')
+    }
+    const page = Math.min(Math.max(Number(pagina) || 1, 1), 10)
+    return this.discogs.searchReleases(query, page)
+  }
+
+  /** POST /api/discogs/discos/:releaseId/importar — grava o disco no catálogo e devolve o resumo. */
+  @Post('discos/:releaseId/importar')
+  importRelease(@Param('releaseId', ParseIntPipe) releaseId: number, @Req() req: RequestWithUser) {
+    return this.discogs.importRelease(releaseId, requireUser(req))
   }
 }
 

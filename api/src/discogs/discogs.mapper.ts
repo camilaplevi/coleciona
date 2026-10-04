@@ -1,25 +1,19 @@
-// api/src/discogs/discogs.mapper.ts
-//
-// Converte o formato do Discogs — que é dele, não nosso — para os tipos de
-// domínio que web/src/types/catalog.ts declara. Fica perto do serviço que
-// fala com o Discogs, e não espalhado pelos componentes Vue.
+// Traduz o formato do Discogs para os tipos de domínio em web/src/types/catalog.ts.
 
 import type { Prisma } from '../generated/prisma/client.js'
 import type { ArticleForm } from '../generated/prisma/enums.js'
 
-/** Só os campos do resultado de busca que a UI precisa pra montar uma lista. */
 export interface DiscogsArtistSearchResult {
   discogsId: number
   name: string
   imageUrl: string | null
 }
 
-/** Suficiente do artista completo pra gente montar uma linha de `artists`. */
 export interface DiscogsArtistDetail {
   id: number
   name: string
   images?: Array<{ type: 'primary' | 'secondary'; uri: string }>
-  /** Presente só em artistas que são grupo — é o sinal que temos de "banda". */
+  // Só artistas-grupo têm members: é o sinal de "banda".
   members?: Array<{ id: number; name: string }>
 }
 
@@ -41,11 +35,7 @@ export interface RawArtistResponse {
   members?: Array<{ id: number; name: string; active?: boolean }>
 }
 
-/**
- * O Discogs sufixa nomes repetidos com um número de desambiguação, tipo
- * "Chico Buarque (2)" — é o mecanismo deles pra dois artistas homônimos
- * terem URLs diferentes. Isso não deveria aparecer pra quem usa o app.
- */
+/** Sufixo de desambiguação do Discogs ("Chico Buarque (2)"): não deve aparecer no app. */
 function stripDisambiguation(rawName: string): string {
   return rawName.replace(/\s*\(\d+\)$/, '').trim()
 }
@@ -53,12 +43,7 @@ function stripDisambiguation(rawName: string): string {
 const TRAILING_ARTICLE = /^(.+),\s*(the|os|as|o|a)$/i
 const LEADING_ARTICLE = /^(os|as|o|a|the)\s+/i
 
-/**
- * O Discogs também indexa pelo artigo no final ("Mutantes, Os", "Beatles,
- * The") — é a convenção deles pra ordenação alfabética. A gente já separa
- * nome de exibição e nome de ordenação (sortName), então extrai dos dois
- * formatos que o Discogs manda.
- */
+/** O Discogs indexa pelo artigo no fim ("Mutantes, Os"). Separamos nome de exibição e sortName. */
 function splitNameForSorting(rawName: string): { name: string; sortName: string; article: string | null } {
   const trailing = rawName.match(TRAILING_ARTICLE)
   if (trailing) {
@@ -76,11 +61,8 @@ function splitNameForSorting(rawName: string): { name: string; sortName: string;
 }
 
 /**
- * O Discogs não tem gênero gramatical — é conceito nosso, não deles. Dá pra
- * inferir "banda" com confiança (tem `members`), mas masculino/feminino é
- * chute: usamos o artigo que o próprio nome carrega quando existe, e caímos
- * em masculino por padrão. Fica sujeito a correção manual depois — não tem
- * como fazer melhor só com o que o Discogs devolve.
+ * Gênero gramatical não vem do Discogs. "banda" é certo (tem members); masculino ou feminino
+ * sai do artigo do nome, com masculino como padrão. Pode precisar de correção manual.
  */
 function guessArticleForm(isGroup: boolean, article: string | null): ArticleForm {
   if (isGroup) return 'banda'
@@ -111,7 +93,6 @@ export function parseArtistDetail(raw: RawArtistResponse): DiscogsArtistDetail {
   }
 }
 
-/** Dados prontos pra um `create`/`update` de `artists` a partir do Discogs. */
 export function toArtistData(detail: DiscogsArtistDetail): Prisma.ArtistUncheckedCreateInput {
   const isGroup = Boolean(detail.members?.length)
   const { name, sortName, article } = splitNameForSorting(detail.name)
@@ -123,8 +104,7 @@ export function toArtistData(detail: DiscogsArtistDetail): Prisma.ArtistUnchecke
     sortName,
     articleForm: guessArticleForm(isGroup, article),
     imageUrl: primaryImage?.uri ?? null,
-    // Discogs não expõe período de atividade em campo estruturado — fica
-    // null até alguém preencher na tela de edição do artista.
+    // Discogs não expõe período de atividade: fica null até edição manual.
     activeFrom: null,
     activeTo: null,
   }
@@ -149,5 +129,101 @@ export function toArtist(row: ArtistRow) {
     activeFrom: row.activeFrom,
     activeTo: row.activeTo,
     imageUrl: row.imageUrl,
+  }
+}
+
+/** Discogs usa este id para "Various" nas coletâneas: não é um artista de verdade. */
+const VARIOUS_ARTIST_ID = 194
+
+export interface ReleaseSearchItem {
+  discogsId: number
+  artist: string | null
+  title: string
+  year: number | null
+  label: string | null
+  genres: string[]
+  coverUrl: string | null
+}
+
+interface RawReleaseSearchItem {
+  id: number
+  title: string
+  year?: string
+  label?: string[]
+  genre?: string[]
+  cover_image?: string
+  thumb?: string
+}
+
+export interface RawReleaseSearchResponse {
+  results: RawReleaseSearchItem[]
+}
+
+/** O título vem como "Artista - Título"; separa no primeiro " - ". */
+export function toReleaseSearchResults(raw: RawReleaseSearchResponse): ReleaseSearchItem[] {
+  return raw.results.map((item) => {
+    const separator = item.title.indexOf(' - ')
+    const artist = separator > 0 ? item.title.slice(0, separator) : null
+    const title = separator > 0 ? item.title.slice(separator + 3) : item.title
+    const year = Number(item.year)
+
+    return {
+      discogsId: item.id,
+      artist: artist ? stripDisambiguation(artist) : null,
+      title,
+      year: Number.isInteger(year) && year > 0 ? year : null,
+      label: item.label?.[0] ?? null,
+      genres: item.genre ?? [],
+      coverUrl: item.cover_image || item.thumb || null,
+    }
+  })
+}
+
+export interface RawRelease {
+  id: number
+  title: string
+  year?: number
+  labels?: Array<{ name: string }>
+  genres?: string[]
+  images?: Array<{ type: string; uri: string }>
+  artists?: Array<{ id: number; name: string }>
+  tracklist?: Array<{ position: string; title: string; duration?: string; type_?: string }>
+}
+
+export interface ReleaseDetail {
+  discogsId: number
+  title: string
+  year: number | null
+  label: string | null
+  genres: string[]
+  coverUrl: string | null
+  isCompilation: boolean
+  artists: Array<{ id: number; name: string }>
+  tracks: Array<{ position: string; title: string; duration: string | null }>
+}
+
+export function parseRelease(raw: RawRelease): ReleaseDetail {
+  const artists = raw.artists ?? []
+  const primaryImage = raw.images?.find((img) => img.type === 'primary') ?? raw.images?.[0]
+
+  return {
+    discogsId: raw.id,
+    title: raw.title,
+    year: raw.year && raw.year > 0 ? raw.year : null,
+    label: raw.labels?.[0]?.name ?? null,
+    genres: raw.genres ?? [],
+    coverUrl: primaryImage?.uri ?? null,
+    isCompilation: artists.some((artist) => artist.id === VARIOUS_ARTIST_ID),
+    artists: artists
+      .filter((artist) => artist.id !== VARIOUS_ARTIST_ID)
+      .map((artist) => ({ id: artist.id, name: stripDisambiguation(artist.name) })),
+    // Títulos de seção ("Side A") vêm no mesmo tracklist: só interessam as faixas.
+    tracks: (raw.tracklist ?? [])
+      .filter((track) => (track.type_ ?? 'track') === 'track' && track.title)
+      .map((track) => ({
+        position: track.position,
+        title: track.title,
+        duration: track.duration || null,
+      })),
   }
 }
