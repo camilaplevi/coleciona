@@ -6,8 +6,9 @@ import { CollectionModule } from './collection/collection.module.js';
 import { DiscogsModule } from './discogs/discogs.module.js';
 import { CatalogModule } from './catalog/catalog.module.js';
 import { OnboardingModule } from './onboarding/onboarding.module.js';
-import { MailModule } from './mail/mail.module.js';
-import { AuthModule } from './auth/auth.module.js';
+import { AuthModule } from './auth/auth.module.js'
+import { MailModule } from './mail/mail.module.js'
+import { ProfileModule } from './profile/profile.module.js';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { AuthModule } from './auth/auth.module.js';
     CatalogModule,
     DiscogsModule,
     OnboardingModule,
+    ProfileModule,
   ],
   controllers: [AppController],
   providers: [AppService],
